@@ -12,6 +12,7 @@ Coord: TypeAlias = tuple[int, int]  # y, x
 
 @dataclass
 class Config:
+    """Container for agent coordinates (y, x) over time."""
     positions: list[Coord] = field(default_factory=lambda: [])
 
     def __getitem__(self, k: int) -> Coord:
@@ -35,6 +36,7 @@ Configs: TypeAlias = list[Config]
 
 @dataclass
 class Deadline:
+    """Simple deadline utility tracking elapsed milliseconds."""
     time_limit_ms: int
 
     def __post_init__(self) -> None:
@@ -50,6 +52,7 @@ class Deadline:
 
 
 def get_grid(map_file: str | Path) -> Grid:
+    """Parse a .map file into a boolean occupancy grid (True = free)."""
     width, height = 0, 0
     with open(map_file, "r") as f:
         # retrieve map size
@@ -84,6 +87,7 @@ def get_grid(map_file: str | Path) -> Grid:
 
 
 def get_scenario(scen_file: str | Path, N: int | None = None) -> tuple[Config, Config]:
+    """Load start/goal positions from a .scen file, optionally limited to N agents."""
     with open(scen_file, "r") as f:
         starts, goals = Config(), Config()
         for row in f:
@@ -103,6 +107,7 @@ def get_scenario(scen_file: str | Path, N: int | None = None) -> tuple[Config, C
 
 
 def is_valid_coord(grid: Grid, coord: Coord) -> bool:
+    """Return True if coord is inside bounds and not an obstacle."""
     y, x = coord
     if y < 0 or y >= grid.shape[0] or x < 0 or x >= grid.shape[1] or not grid[coord]:
         return False
@@ -110,6 +115,7 @@ def is_valid_coord(grid: Grid, coord: Coord) -> bool:
 
 
 def get_neighbors(grid: Grid, coord: Coord) -> list[Coord]:
+    """Return accessible 4-neighborhood cells for a coordinate."""
     # coord: y, x
     neigh: list[Coord] = []
 
@@ -135,6 +141,7 @@ def get_neighbors(grid: Grid, coord: Coord) -> list[Coord]:
 
 
 def save_configs_for_visualizer(configs: Configs, filename: str | Path) -> None:
+    """Persist agent trajectories in a simple text format for visualization."""
     output_dirname = Path(filename).parent
     if not output_dirname.exists():
         output_dirname.mkdir(parents=True, exist_ok=True)
@@ -150,6 +157,7 @@ def validate_mapf_solution(
     goals: Config,
     solution: Configs,
 ) -> None:
+    """Assert that a MAPF solution is valid (connectivity, collisions, start/goal)."""
     assert len(solution) > 0, "invalid solution, empty"
 
     # starts
@@ -191,6 +199,7 @@ def is_valid_mapf_solution(
     goals: Config,
     solution: Configs,
 ) -> bool:
+    """Return True if the provided MAPF solution passes validation."""
     try:
         validate_mapf_solution(grid, starts, goals, solution)
         return True
@@ -200,6 +209,7 @@ def is_valid_mapf_solution(
 
 
 def get_sum_of_loss(configs: Configs) -> int:
+    """Compute sum-of-cost metric (agents not yet at goal) over a plan."""
     cost = 0
     for t in range(1, len(configs)):
         cost += sum(

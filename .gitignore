@@ -59,3 +59,6 @@ coverage.xml
 
 # VS Code
 .vscode/
+
+# Project specific
+data/

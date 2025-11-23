@@ -9,12 +9,12 @@ import argparse
 
 import numpy as np
 
-from mapf_utils import get_grid, get_neighbors
+from .mapf_utils import get_grid, get_neighbors
 
 
 def create_training_data(map_file_paths: List[str]) -> List[tuple[np.ndarray, np.ndarray]]:
     """
-    Load maps and concatenate their simulated training data.
+    Load maps and generate training data for each map.
 
     Parameters
     ----------
@@ -25,12 +25,11 @@ def create_training_data(map_file_paths: List[str]) -> List[tuple[np.ndarray, np
     Returns
     -------
     list[tuple[np.ndarray, np.ndarray]]
-        Combined training data for all provided maps (inputs, labels).
+        List of `(inputs, labels)` pairs, one per map.
     """
 
     grids = (_load_grid(path) for path in map_file_paths)
-    inputs, labels = zip(*(create_training_data_for_map(grid) for grid in grids))
-    return inputs, labels
+    return [create_training_data_for_map(grid) for grid in grids]
 
 
 def _load_grid(path: str):
@@ -204,7 +203,7 @@ def load_training_data(filepath: str | Path) -> tuple[np.ndarray, np.ndarray]:
 
 if __name__ == "__main__":
     args = _parse_args()
-    inputs, labels = create_training_data(args.maps)
-    total_samples = sum(inputs.shape[0] for inputs in inputs)
-    print(f"Created training data for {len(inputs)} maps with {total_samples} samples")
+    datasets = create_training_data(args.maps)
+    total_samples = sum(inputs.shape[0] for inputs, _ in datasets)
+    print(f"Created training data for {len(datasets)} maps with {total_samples} samples")
     

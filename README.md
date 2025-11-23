@@ -59,5 +59,11 @@ Add additional dependencies to `requirements.txt` as the project evolves.
    - `python app.py --train-data data/train_*.npz --output-dir artifacts`
    - Artifacts written to `artifacts/model.pt` and `artifacts/loss_history.json`.
 2. Plot loss curve:
-   - `python plot_losses.py`
-   - Outputs `artifacts/loss_curve.png` (override paths in `plot_losses.py` if needed).
+   - `python evaluation_utils.py`
+   - Outputs `artifacts/loss_curve.png` (override paths in `evaluation_utils.py` if needed).
+3. Plot a predicted value map for a goal on a given map:
+   - In Python: 
+     ```python
+     from evaluation_utils import plot_predicted_value_map
+     plot_predicted_value_map("path/to/map.map", goal=(y, x), model_path="artifacts/model.pt", output_path="artifacts/pred_value_map.png")
+     ```

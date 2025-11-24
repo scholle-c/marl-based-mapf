@@ -10,24 +10,67 @@ import torch
 from matplotlib import cm
 from torchviz import make_dot
 
-from value_map_learner import DistanceTableCNN
+from value_map_learner import (
+    DistanceTableCNN,
+    DistanceTableDataset,
+    evaluate,
+    pad_collate,
+)
 from value_map_learner.mapf_utils import get_grid
 
 
+def _load_histories(paths: Sequence[str | Path]) -> list[dict[str, list[float]]]:
+    histories: list[dict[str, list[float]]] = []
+    for p in paths:
+        data = json.loads(Path(p).read_text(encoding="utf-8"))
+        histories.append({"train": data.get("train", []), "val": data.get("val", [])})
+    return histories
+
+
+def _plot_with_band(x: np.ndarray, lines: np.ndarray, label: str, color: str) -> None:
+    mean = lines.mean(axis=0)
+    std = lines.std(axis=0)
+    plt.plot(x, mean, label=label, color=color)
+    plt.fill_between(x, mean - std, mean + std, color=color, alpha=0.2)
+
+
 def plot_loss_curve(
-    history_path: str | Path = "output/loss_history.json",
+    history_path: str | Path | Sequence[str | Path] = "output/loss_history.json",
     output_path: str | Path = "output/loss_curve.png",
 ) -> None:
-    """Load loss history JSON and save a loss curve image."""
-    history = json.loads(Path(history_path).read_text(encoding="utf-8"))
-    train_losses = history.get("train", [])
-    val_losses = history.get("val", [])
-    epochs = range(1, len(train_losses) + 1)
+    """
+    Load one or more loss history JSONs and save a loss curve image.
+
+    If multiple histories are provided, plots the mean with a shaded std band.
+    """
+    paths = [history_path] if isinstance(history_path, (str, Path)) else list(history_path)
+    histories = _load_histories(paths)
+
+    train_arrays = [np.array(h["train"], dtype=float) for h in histories if h.get("train")]
+    val_arrays = [np.array(h["val"], dtype=float) for h in histories if h.get("val")]
 
     plt.figure(figsize=(6, 4))
-    plt.plot(epochs, train_losses, label="train")
-    if val_losses:
-        plt.plot(range(1, len(val_losses) + 1), val_losses, label="val")
+
+    if train_arrays:
+        max_len = min(len(arr) for arr in train_arrays)
+        train_trimmed = np.stack([arr[:max_len] for arr in train_arrays])
+        epochs = np.arange(1, max_len + 1)
+        color = "tab:blue"
+        if len(train_arrays) == 1:
+            plt.plot(epochs, train_trimmed[0], label="train", color=color)
+        else:
+            _plot_with_band(epochs, train_trimmed, label="train (mean ± std)", color=color)
+
+    if val_arrays:
+        max_len = min(len(arr) for arr in val_arrays)
+        val_trimmed = np.stack([arr[:max_len] for arr in val_arrays])
+        epochs = np.arange(1, max_len + 1)
+        color = "tab:orange"
+        if len(val_arrays) == 1:
+            plt.plot(epochs, val_trimmed[0], label="val", color=color)
+        else:
+            _plot_with_band(epochs, val_trimmed, label="val (mean ± std)", color=color)
+
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Training Loss")
@@ -175,14 +218,34 @@ def visualize_model(
     print(f"Saved model graph to {Path(output_path).with_suffix('.png').resolve()}")
 
 
+def evaluate_archives(
+    model_path: str | Path,
+    archives: Sequence[str | Path],
+    device: str | torch.device | None = None,
+    batch_size: int = 8,
+) -> float:
+    """Evaluate a trained model on provided archives and return the mean loss."""
+    if not archives:
+        raise ValueError("At least one archive path is required for evaluation.")
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    model = _prepare_model(model_path, device)
+    dataset = DistanceTableDataset(archives=archives)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, collate_fn=pad_collate
+    )
+    return evaluate(model, dataloader, device)
+
+
 def main() -> None:
     """CLI helper to plot loss curve, predict a value map, or visualize the model graph based on arguments."""
     parser = argparse.ArgumentParser(description="Evaluation utilities for Value Map Learner.")
     parser.add_argument(
         "--mode",
-        choices=["loss", "predict", "visualize"],
+        choices=["loss", "predict", "visualize", "test"],
         default="loss",
-        help="Choose 'loss' to plot training curves, 'predict' to plot a value map, or 'visualize' to export the model graph.",
+        help="Choose 'loss' to plot training curves, 'predict' to plot a value map, "
+        "'visualize' to export the model graph, or 'test' to evaluate a model on archives.",
     )
     parser.add_argument("--history-path", default="output/loss_history.json", help="Path to loss history JSON.")
     parser.add_argument("--loss-output", default="output/loss_curve.png", help="Output path for loss plot.")
@@ -191,6 +254,12 @@ def main() -> None:
     parser.add_argument("--model-path", default="output/model.pt", help="Checkpoint path for prediction.")
     parser.add_argument("--pred-output", help="Output path for predicted value map image.")
     parser.add_argument("--graph-output", default="output/model_graph", help="Output path for model graph image.")
+    parser.add_argument(
+        "--test-data",
+        nargs="+",
+        help="Paths to .npz archives to evaluate when mode is 'test'.",
+    )
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size for test mode.")
     parser.add_argument("--device", help="Device for model inference (e.g., cuda or cpu).")
 
     args = parser.parse_args()
@@ -207,6 +276,16 @@ def main() -> None:
             device=args.device,
             output_path=args.pred_output,
         )
+    elif args.mode == "test":
+        if not args.test_data:
+            parser.error("--test-data is required for mode 'test'.")
+        loss = evaluate_archives(
+            model_path=args.model_path,
+            archives=args.test_data,
+            device=args.device,
+            batch_size=args.batch_size,
+        )
+        print(f"Test loss: {loss:.4f}")
     else:
         if not args.map_path:
             parser.error("--map-path is required for mode 'visualize'.")

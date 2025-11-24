@@ -222,7 +222,7 @@ def run_training(config: TrainingConfig) -> nn.Module:
     torch.save(model.state_dict(), output_dir / "model.pt")
     with open(output_dir / "loss_history.json", "w", encoding="utf-8") as f:
         json.dump(history, f)
-    return model
+    return model, history
 
 
 def load_archives_from_paths(paths: Iterable[str]) -> list[Path]:

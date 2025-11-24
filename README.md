@@ -29,62 +29,72 @@ Add additional dependencies to `requirements.txt` as the project evolves.
 
 ## Usage
 
-### CLI overview
+`app.py` forwards to the main CLI with three modes: `generate`, `train`, and `eval`.
 
-The CLI now uses subcommands. `app.py` remains as a thin wrapper that forwards to this interface.
+### Mode: generate
 
-- Generate archives from maps:
-  - `python -m value_map_learner.cli generate --maps assets/connector.map assets/corners.map --output-dir data/generated --samples-per-map 200`
-- Train from existing archives:
-  - `python -m value_map_learner.cli train --train-data data/train_*.npz --output-dir output --seed 123`
-- Train while generating in-memory (no disk writes):
-  - `python -m value_map_learner.cli train --maps assets/connector.map assets/corners.map --samples-per-map 200 --epochs 20 --seed 123`
-- Train while generating and persisting the generated data:
-  - `python -m value_map_learner.cli train --maps assets/connector.map --save-generated-data data/generated --output-dir output --seed 123`
+Example:
 
-### Config-driven training
-
-You can point the `train` subcommand at a config file (JSON/TOML/YAML). CLI flags override config values when both are present.
-
-Example `configs/train.json`:
-
-```json
-{
-  "train_archives": ["data/train_001.npz", "data/train_002.npz"],
-  "val_archives": ["data/val_001.npz"],
-  "epochs": 15,
-  "batch_size": 8,
-  "learning_rate": 0.001,
-  "device": "cuda",
-  "output_dir": "output",
-  "seed": 123
-}
+```console
+python app.py generate --maps assets/connector.map assets/corners.map --output-dir data/generated --samples-per-map 200 --seed 123
 ```
 
-Run with:
+| Argument | Description | Default |
+| --- | --- | --- |
+| `--maps` | Map file paths to generate data from. | required |
+| `--samples-per-map` | Number of samples per map; if omitted, all accessible positions. | all |
+| `--output-dir` | Where to store generated `.npz` archives. | required |
+| `--config` | JSON/TOML/YAML config; CLI flags override. | none |
+| `--seed` | RNG seed for reproducible sampling. | none |
 
-```python
-python -m value_map_learner.cli train --config configs/train.json
+### Mode: train
+
+Examples:
+
+```console
+python app.py train --train-data data/train_*.npz --output-dir output --seed 123
+python app.py train --maps assets/connector.map --samples-per-map 200 --save-generated-data data/generated --output-dir output --seed 123
 ```
 
-### Config-driven data generation
+| Argument | Description | Default |
+| --- | --- | --- |
+| `--config` | JSON/TOML/YAML config; CLI flags override. | none |
+| `--train-data` | Paths to `.npz` training archives. | none |
+| `--val-data` | Optional validation archives. | none |
+| `--maps` | Map files to generate training data from. | none |
+| `--samples-per-map` | Samples per map when generating. | all |
+| `--save-generated-data` | Directory to persist generated archives. | none |
+| `--epochs` | Training epochs. | 10 |
+| `--batch-size` | Batch size. | 8 |
+| `--lr` | Learning rate. | 1e-3 |
+| `--device` | Training device. | auto (cuda if available) |
+| `--output-dir` | Where to store model/loss outputs. | `output` |
+| `--seed` | Seed for generation and training. | none |
 
-Example `configs/data_generation.json`:
+### Mode: eval
 
-```json
-{
-  "maps": ["assets/connector.map", "assets/corners.map"],
-  "samples_per_map": 200,
-  "output_dir": "data/generated",
-  "seed": 123
-}
+Examples:
+
+```console
+python app.py eval --mode loss --history-path output/loss_history.json --loss-output output/loss_curve.png
+python app.py eval --mode test --model-path output/model.pt --test-data data/val_*.npz --batch-size 8
+python app.py eval --mode predict --map-path assets/connector.map --goal 2 3 --model-path output/model.pt --pred-output output/pred_value_map.png
+python app.py eval --mode visualize --map-path assets/connector.map --model-path output/model.pt --graph-output output/model_graph
 ```
 
-Generate archives using the config (CLI flags still override config keys):
-
-```python
-python -m value_map_learner.cli generate --config configs/data_generation.json
-```
+| Argument | Description | Default |
+| --- | --- | --- |
+| `--mode` | `loss`, `predict`, `visualize`, or `test`. | `loss` |
+| `--history-path` | Path(s) to loss history JSON (loss mode). | `output/loss_history.json` |
+| `--loss-output` | Output path for loss plot (loss mode). | `output/loss_curve.png` |
+| `--map-path` | Map file (predict/visualize modes). | none |
+| `--goal` | Goal coordinate `y x` (predict mode). | none |
+| `--model-path` | Model checkpoint. | `output/model.pt` |
+| `--pred-output` | Output image path (predict mode). | none (show) |
+| `--graph-output` | Output path for model graph (visualize mode). | `output/model_graph` |
+| `--test-data` | Archives to evaluate (test mode). | none |
+| `--batch-size` | Batch size for test mode. | 8 |
+| `--device` | Device for evaluation. | auto |
 
 ## Testing
 
@@ -94,15 +104,12 @@ python -m value_map_learner.cli generate --config configs/data_generation.json
 ### Training + Plotting Workflow
 
 1. Train and save outputs (model + loss history):
-   - `python -m value_map_learner.cli train --train-data data/train_*.npz --output-dir output`
+   - `python app.py train --train-data data/train_*.npz --output-dir output`
    - Outputs written to `output/model.pt` and `output/loss_history.json`.
-2. Plot loss curve:
-   - `python evaluation_utils.py`
-   - Outputs `output/loss_curve.png` (override paths in `evaluation_utils.py` if needed).
-3. Plot a predicted value map for a goal on a given map:
-   - In Python:
-
-     ```python
-     from evaluation_utils import plot_predicted_value_map
-     plot_predicted_value_map("path/to/map.map", goal=(y, x), model_path="output/model.pt", output_path="output/pred_value_map.png")
-     ```
+2. Plot loss curve (supports multiple histories):
+   - `python app.py eval --mode loss --history-path output/loss_history.json --loss-output output/loss_curve.png`
+   - Multiple histories: `python app.py eval --mode loss --history-path output/run_*/loss_history.json --loss-output output/loss_curve.png`
+3. Test a trained model on archives:
+   - `python app.py eval --mode test --model-path output/model.pt --test-data data/val_*.npz --batch-size 8`
+4. Plot a predicted value map for a goal on a given map:
+   - `python app.py eval --mode predict --map-path path/to/map.map --goal 2 3 --model-path output/model.pt --pred-output output/pred_value_map.png`

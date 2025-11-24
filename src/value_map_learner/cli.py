@@ -8,6 +8,12 @@ from typing import Any, Sequence
 
 from .config import load_config
 from .distance_table_prediction import TrainingConfig, run_training
+from .evaluation_utils import (
+    evaluate_archives,
+    plot_loss_curve,
+    plot_predicted_value_map,
+    visualize_model,
+)
 from .training_data_generation import create_training_data, save_training_data
 
 
@@ -133,6 +139,36 @@ def _configure_generate_parser(subparsers) -> None:
     gen_parser.set_defaults(func=_cmd_generate)
 
 
+def _configure_eval_parser(subparsers) -> None:
+    """Attach the eval subcommand (loss plots, prediction, visualization, testing)."""
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Evaluation utilities: plot loss, predict on a map, visualize model, or test on archives.",
+    )
+    eval_parser.add_argument(
+        "--mode",
+        choices=["loss", "predict", "visualize", "test"],
+        default="loss",
+        help="What to do: plot loss curve, predict value map, visualize graph, or compute test loss.",
+    )
+    eval_parser.add_argument(
+        "--history-path",
+        nargs="+",
+        default=["output/loss_history.json"],
+        help="Path(s) to loss history JSON file(s).",
+    )
+    eval_parser.add_argument("--loss-output", default="output/loss_curve.png", help="Output path for loss plot.")
+    eval_parser.add_argument("--map-path", help="Map file path for prediction/visualization.")
+    eval_parser.add_argument("--goal", nargs=2, type=int, metavar=("Y", "X"), help="Goal coordinate (y x).")
+    eval_parser.add_argument("--model-path", default="output/model.pt", help="Checkpoint path for prediction.")
+    eval_parser.add_argument("--pred-output", help="Output path for predicted value map image.")
+    eval_parser.add_argument("--graph-output", default="output/model_graph", help="Output path for model graph image.")
+    eval_parser.add_argument("--test-data", nargs="+", help="Paths to .npz archives for mode 'test'.")
+    eval_parser.add_argument("--batch-size", type=int, default=8, help="Batch size for mode 'test'.")
+    eval_parser.add_argument("--device", help="Device for model inference (cuda or cpu).")
+    eval_parser.set_defaults(func=_cmd_eval)
+
+
 def _cmd_generate(args: argparse.Namespace) -> None:
     """Handle the `generate` subcommand: produce archives from map files."""
     config_data = _load_config_data(args.config)
@@ -184,12 +220,54 @@ def _cmd_train(args: argparse.Namespace) -> None:
     run_training(_build_training_config(params, train_archives, in_memory_train_data))
 
 
+def _cmd_eval(args: argparse.Namespace) -> None:
+    """Handle evaluation tasks (loss plotting, prediction, model viz, or test)."""
+    if args.mode == "loss":
+        plot_loss_curve(history_path=args.history_path, output_path=args.loss_output)
+        return
+
+    if args.mode == "predict":
+        if not args.map_path or not args.goal:
+            raise SystemExit("--map-path and --goal are required for mode 'predict'.")
+        plot_predicted_value_map(
+            map_path=args.map_path,
+            goal=tuple(args.goal),
+            model_path=args.model_path,
+            device=args.device,
+            output_path=args.pred_output,
+        )
+        return
+
+    if args.mode == "visualize":
+        if not args.map_path:
+            raise SystemExit("--map-path is required for mode 'visualize'.")
+        visualize_model(
+            model_path=args.model_path,
+            output_path=args.graph_output,
+            map_path=args.map_path,
+            device=args.device,
+        )
+        return
+
+    # mode == "test"
+    if not args.test_data:
+        raise SystemExit("--test-data is required for mode 'test'.")
+    loss = evaluate_archives(
+        model_path=args.model_path,
+        archives=args.test_data,
+        device=args.device,
+        batch_size=args.batch_size,
+    )
+    print(f"Test loss: {loss:.4f}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level CLI parser with subcommands."""
     parser = argparse.ArgumentParser(prog="value-map-learner", description="Value Map Learner CLI.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     _configure_generate_parser(subparsers)
     _configure_train_parser(subparsers)
+    _configure_eval_parser(subparsers)
     return parser
 
 

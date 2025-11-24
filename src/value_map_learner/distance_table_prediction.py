@@ -167,7 +167,7 @@ class TrainingConfig:
     epochs: int = 10
     learning_rate: float = 1e-3
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    output_dir: Path | str = Path("artifacts")
+    output_dir: Path | str = Path("output")
 
 
 def run_training(config: TrainingConfig) -> nn.Module:

@@ -15,8 +15,8 @@ from value_map_learner.mapf_utils import get_grid
 
 
 def plot_loss_curve(
-    history_path: str | Path = "artifacts/loss_history.json",
-    output_path: str | Path = "artifacts/loss_curve.png",
+    history_path: str | Path = "output/loss_history.json",
+    output_path: str | Path = "output/loss_curve.png",
 ) -> None:
     """Load loss history JSON and save a loss curve image."""
     history = json.loads(Path(history_path).read_text(encoding="utf-8"))
@@ -73,7 +73,7 @@ def _build_input_tensor(grid: np.ndarray, goal: tuple[int, int]) -> torch.Tensor
 def plot_predicted_value_map(
     map_path: str | Path,
     goal: Sequence[int] | tuple[int, int],
-    model_path: str | Path = "artifacts/model.pt",
+    model_path: str | Path = "output/model.pt",
     device: str | torch.device | None = None,
     output_path: str | Path | None = None,
 ) -> np.ndarray:
@@ -141,8 +141,8 @@ def plot_predicted_value_map(
 
 
 def visualize_model(
-    model_path: str | Path = "artifacts/model.pt",
-    output_path: str | Path = "artifacts/model_graph",
+    model_path: str | Path = "output/model.pt",
+    output_path: str | Path = "output/model_graph",
     map_path: str | Path | None = None,
     device: str | torch.device | None = None,
 ) -> None:
@@ -184,13 +184,13 @@ def main() -> None:
         default="loss",
         help="Choose 'loss' to plot training curves, 'predict' to plot a value map, or 'visualize' to export the model graph.",
     )
-    parser.add_argument("--history-path", default="artifacts/loss_history.json", help="Path to loss history JSON.")
-    parser.add_argument("--loss-output", default="artifacts/loss_curve.png", help="Output path for loss plot.")
+    parser.add_argument("--history-path", default="output/loss_history.json", help="Path to loss history JSON.")
+    parser.add_argument("--loss-output", default="output/loss_curve.png", help="Output path for loss plot.")
     parser.add_argument("--map-path", help="Map file path for prediction/visualization.")
     parser.add_argument("--goal", nargs=2, type=int, metavar=("Y", "X"), help="Goal coordinate (y x).")
-    parser.add_argument("--model-path", default="artifacts/model.pt", help="Checkpoint path for prediction.")
+    parser.add_argument("--model-path", default="output/model.pt", help="Checkpoint path for prediction.")
     parser.add_argument("--pred-output", help="Output path for predicted value map image.")
-    parser.add_argument("--graph-output", default="artifacts/model_graph", help="Output path for model graph image.")
+    parser.add_argument("--graph-output", default="output/model_graph", help="Output path for model graph image.")
     parser.add_argument("--device", help="Device for model inference (e.g., cuda or cpu).")
 
     args = parser.parse_args()

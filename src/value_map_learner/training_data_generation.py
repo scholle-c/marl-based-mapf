@@ -12,7 +12,9 @@ import numpy as np
 from .mapf_utils import get_grid, get_neighbors
 
 
-def create_training_data(map_file_paths: List[str]) -> List[tuple[np.ndarray, np.ndarray]]:
+def create_training_data(
+    map_file_paths: List[str], n_samples: int | None = None
+) -> List[tuple[np.ndarray, np.ndarray]]:
     """
     Load maps and generate training data for each map.
 
@@ -21,6 +23,9 @@ def create_training_data(map_file_paths: List[str]) -> List[tuple[np.ndarray, np
     map_file_paths:
         Sequence of file paths pointing to map descriptions that can be fed to
         `mapf_utils.get_grid`.
+    n_samples:
+        Optional number of samples to draw per map. If `None`, one sample is
+        created for every accessible position.
 
     Returns
     -------
@@ -29,7 +34,7 @@ def create_training_data(map_file_paths: List[str]) -> List[tuple[np.ndarray, np
     """
 
     grids = (_load_grid(path) for path in map_file_paths)
-    return [create_training_data_for_map(grid) for grid in grids]
+    return [create_training_data_for_map(grid, n_samples) for grid in grids]
 
 
 def _load_grid(path: str):
@@ -46,6 +51,11 @@ def _parse_args():
         nargs="+",
         required=True,
         help="Paths to map files consumed by get_grid().",
+    )
+    parser.add_argument(
+        "--samples-per-map",
+        type=int,
+        help="Optional number of samples to generate per map.",
     )
     return parser.parse_args()
 
@@ -111,7 +121,9 @@ def create_distance_table(grid: np.ndarray, goal_coordinate: tuple[int, int]) ->
     return distance_map
 
 
-def create_training_data_for_map(grid) -> tuple[np.ndarray, np.ndarray]:
+def create_training_data_for_map(
+    grid, n_samples: int | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate input/label pairs for a single map by creating distance tables for all accessible positions.
 
@@ -119,6 +131,11 @@ def create_training_data_for_map(grid) -> tuple[np.ndarray, np.ndarray]:
     ----------
     grid:
         Two-dimensional boolean numpy array representing the map.
+    n_samples:
+        Optional number of samples to create. If omitted, a sample is created
+        for each accessible position on the map. When provided, goal positions
+        are drawn uniformly across accessible positions and paired with random
+        starts.
 
     Returns
     -------
@@ -126,7 +143,6 @@ def create_training_data_for_map(grid) -> tuple[np.ndarray, np.ndarray]:
         - Inputs with shape (num_positions, 3, height, width) where channels are map, goal, start.
         - Labels with shape (num_positions, height, width) containing distance maps.
     """
-    # TODO: You could add features like "Create Samples...": for all start-goal combinations, for random start-goal pairs
     accessible_positions = get_all_possible_map_positions(grid)
 
     if not accessible_positions:
@@ -134,13 +150,31 @@ def create_training_data_for_map(grid) -> tuple[np.ndarray, np.ndarray]:
         empty_labels = np.empty((0,) + grid.shape, dtype=float)
         return empty_inputs, empty_labels
 
+    if n_samples is not None and n_samples < 0:
+        raise ValueError("n_samples must be non-negative.")
+
     map_channel = grid.astype(np.int8, copy=False)
     rng = np.random.default_rng()
 
     input_samples: list[np.ndarray] = []
     label_samples: list[np.ndarray] = []
 
-    for goal in accessible_positions:
+    if n_samples is None:
+        goal_positions = accessible_positions
+    else:
+        total_positions = len(accessible_positions)
+        full_repeats, remainder = divmod(n_samples, total_positions)
+        goal_positions = accessible_positions * full_repeats
+        if remainder:
+            indices = rng.choice(total_positions, size=remainder, replace=False)
+            goal_positions.extend(accessible_positions[idx] for idx in indices)
+
+    if not goal_positions:
+        empty_inputs = np.empty((0, 3) + grid.shape, dtype=np.int8)
+        empty_labels = np.empty((0,) + grid.shape, dtype=float)
+        return empty_inputs, empty_labels
+
+    for goal in goal_positions:
         goal_channel = np.zeros_like(map_channel, dtype=np.int8)
         goal_channel[goal] = 1
 
@@ -203,7 +237,7 @@ def load_training_data(filepath: str | Path) -> tuple[np.ndarray, np.ndarray]:
 
 if __name__ == "__main__":
     args = _parse_args()
-    datasets = create_training_data(args.maps)
+    datasets = create_training_data(args.maps, args.samples_per_map)
     total_samples = sum(inputs.shape[0] for inputs, _ in datasets)
     print(f"Created training data for {len(datasets)} maps with {total_samples} samples")
     

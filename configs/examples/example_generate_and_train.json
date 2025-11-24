@@ -1,0 +1,12 @@
+{
+  "maps": [
+    "assets/connector.map",
+    "assets/corners.map"
+  ],
+  "samples_per_map": 200,
+  "epochs": 20,
+  "batch_size": 8,
+  "learning_rate": 0.001,
+  "device": "cuda",
+  "output_dir": "output"
+}

@@ -29,41 +29,78 @@ Add additional dependencies to `requirements.txt` as the project evolves.
 
 ## Usage
 
+### CLI overview
+
+The CLI now uses subcommands. `app.py` remains as a thin wrapper that forwards to this interface.
+
+- Generate archives from maps:
+  - `python -m value_map_learner.cli generate --maps assets/connector.map assets/corners.map --output-dir data/generated --samples-per-map 200`
 - Train from existing archives:
-  - `python app.py --train-data data/train_*.npz`
-- Generate data from maps and train in-memory:
-  - `python app.py --maps path/to/map1 path/to/map2`
-- Generate data, save archives, and train from the saved files:
-  - `python app.py --maps path/to/map1 --save-generated-data data/`
-- Generate only (no training):
-  - `python app.py --maps path/to/map1 --save-generated-data data/ --generate-only`
+  - `python -m value_map_learner.cli train --train-data data/train_*.npz --output-dir output`
+- Train while generating in-memory (no disk writes):
+  - `python -m value_map_learner.cli train --maps assets/connector.map assets/corners.map --samples-per-map 200 --epochs 20`
+- Train while generating and persisting the generated data:
+  - `python -m value_map_learner.cli train --maps assets/connector.map --save-generated-data data/generated --output-dir output`
 
-### CLI Arguments
+### Config-driven training
 
-| Argument | Type | Description | Default Value |
-| --- | --- | --- | --- |
-| `--train-data` | list of str | Paths to `.npz` archives with training data. | none (optional) |
-| `--val-data` | list of str | Paths to `.npz` archives for validation. | none (optional) |
-| `--maps` | list of str | Map file paths to generate training data from. | none (optional) |
-| `--save-generated-data` | str (path) | Directory to save generated `.npz` archives. | none (optional) |
-| `--generate-only` | flag | Generate data (from `--maps`) and exit without training. | `False` |
-| `--epochs` | int | Number of training epochs. | `10` |
-| `--batch-size` | int | Batch size for DataLoaders. | `8` |
-| `--lr` | float | Learning rate. | `1e-3` |
-| `--device` | str | Device for training (`cuda`/`cpu`). | auto-detects CUDA |
-| `--output-dir` | str (path) | Where to store model checkpoint and loss history. | `artifacts` |
+You can point the `train` subcommand at a config file (JSON/TOML/YAML). CLI flags override config values when both are present.
+
+Example `configs/train.json`:
+
+```json
+{
+  "train_archives": ["data/train_001.npz", "data/train_002.npz"],
+  "val_archives": ["data/val_001.npz"],
+  "epochs": 15,
+  "batch_size": 8,
+  "learning_rate": 0.001,
+  "device": "cuda",
+  "output_dir": "output"
+}
+```
+
+Run with:
+
+```python
+python -m value_map_learner.cli train --config configs/train.json
+```
+
+### Config-driven data generation
+
+Example `configs/data_generation.json`:
+
+```json
+{
+  "maps": ["assets/connector.map", "assets/corners.map"],
+  "samples_per_map": 200,
+  "output_dir": "data/generated"
+}
+```
+
+Generate archives using the config (CLI flags still override config keys):
+
+```python
+python -m value_map_learner.cli generate --config configs/data_generation.json
+```
+
+## Testing
+
+- Install test dependencies: `pip install -r requirements-dev.txt`
+- Run the suite: `pytest`
 
 ### Training + Plotting Workflow
 
-1. Train and save artifacts (model + loss history):
-   - `python app.py --train-data data/train_*.npz --output-dir artifacts`
-   - Artifacts written to `artifacts/model.pt` and `artifacts/loss_history.json`.
+1. Train and save outputs (model + loss history):
+   - `python -m value_map_learner.cli train --train-data data/train_*.npz --output-dir output`
+   - Outputs written to `output/model.pt` and `output/loss_history.json`.
 2. Plot loss curve:
    - `python evaluation_utils.py`
-   - Outputs `artifacts/loss_curve.png` (override paths in `evaluation_utils.py` if needed).
+   - Outputs `output/loss_curve.png` (override paths in `evaluation_utils.py` if needed).
 3. Plot a predicted value map for a goal on a given map:
-   - In Python: 
+   - In Python:
+
      ```python
      from evaluation_utils import plot_predicted_value_map
-     plot_predicted_value_map("path/to/map.map", goal=(y, x), model_path="artifacts/model.pt", output_path="artifacts/pred_value_map.png")
+     plot_predicted_value_map("path/to/map.map", goal=(y, x), model_path="output/model.pt", output_path="output/pred_value_map.png")
      ```

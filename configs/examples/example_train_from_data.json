@@ -1,0 +1,14 @@
+{
+  "train_archives": [
+    "data/train_001.npz",
+    "data/train_002.npz"
+  ],
+  "val_archives": [
+    "data/val_001.npz"
+  ],
+  "epochs": 15,
+  "batch_size": 8,
+  "learning_rate": 0.001,
+  "device": "cuda",
+  "output_dir": "output"
+}

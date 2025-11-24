@@ -47,3 +47,14 @@ def test_create_training_data_for_map_respects_sample_limit():
     start_counts = inputs[:, 2].reshape(2, -1).sum(axis=1)
     np.testing.assert_array_equal(goal_counts, np.ones_like(goal_counts))
     np.testing.assert_array_equal(start_counts, np.ones_like(start_counts))
+
+
+def test_create_training_data_seed_reproducibility():
+    grid = np.array([[True, True], [True, True]])
+    rng_a = np.random.default_rng(42)
+    rng_b = np.random.default_rng(42)
+    inputs_a, labels_a = create_training_data_for_map(grid, n_samples=3, rng=rng_a)
+    inputs_b, labels_b = create_training_data_for_map(grid, n_samples=3, rng=rng_b)
+
+    np.testing.assert_array_equal(inputs_a, inputs_b)
+    np.testing.assert_array_equal(labels_a, labels_b)

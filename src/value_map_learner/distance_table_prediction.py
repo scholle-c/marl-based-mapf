@@ -168,10 +168,16 @@ class TrainingConfig:
     learning_rate: float = 1e-3
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     output_dir: Path | str = Path("output")
+    seed: int | None = None
 
 
 def run_training(config: TrainingConfig) -> nn.Module:
     """Train the CNN with provided data sources and persist artifacts."""
+    if config.seed is not None:
+        torch.manual_seed(config.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(config.seed)
+
     device = torch.device(config.device)
 
     if not config.train_archives and not config.train_data:

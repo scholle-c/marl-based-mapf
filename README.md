@@ -36,11 +36,11 @@ The CLI now uses subcommands. `app.py` remains as a thin wrapper that forwards t
 - Generate archives from maps:
   - `python -m value_map_learner.cli generate --maps assets/connector.map assets/corners.map --output-dir data/generated --samples-per-map 200`
 - Train from existing archives:
-  - `python -m value_map_learner.cli train --train-data data/train_*.npz --output-dir output`
+  - `python -m value_map_learner.cli train --train-data data/train_*.npz --output-dir output --seed 123`
 - Train while generating in-memory (no disk writes):
-  - `python -m value_map_learner.cli train --maps assets/connector.map assets/corners.map --samples-per-map 200 --epochs 20`
+  - `python -m value_map_learner.cli train --maps assets/connector.map assets/corners.map --samples-per-map 200 --epochs 20 --seed 123`
 - Train while generating and persisting the generated data:
-  - `python -m value_map_learner.cli train --maps assets/connector.map --save-generated-data data/generated --output-dir output`
+  - `python -m value_map_learner.cli train --maps assets/connector.map --save-generated-data data/generated --output-dir output --seed 123`
 
 ### Config-driven training
 
@@ -56,7 +56,8 @@ Example `configs/train.json`:
   "batch_size": 8,
   "learning_rate": 0.001,
   "device": "cuda",
-  "output_dir": "output"
+  "output_dir": "output",
+  "seed": 123
 }
 ```
 
@@ -74,7 +75,8 @@ Example `configs/data_generation.json`:
 {
   "maps": ["assets/connector.map", "assets/corners.map"],
   "samples_per_map": 200,
-  "output_dir": "data/generated"
+  "output_dir": "data/generated",
+  "seed": 123
 }
 ```
 

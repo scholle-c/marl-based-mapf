@@ -45,12 +45,13 @@ def _load_config_data(config_path: str | None) -> dict[str, Any]:
 
 def _resolve_generation_args(
     args: argparse.Namespace, config_data: dict[str, Any]
-) -> tuple[list[str] | None, int | None, str | None]:
+) -> tuple[list[str] | None, int | None, str | None, int | None]:
     """Resolve generation-specific arguments from CLI/config."""
     maps = _pick(args.maps, config_data.get("maps"))
     samples_per_map = _pick(args.samples_per_map, config_data.get("samples_per_map"))
     output_dir = _pick(args.output_dir, config_data.get("output_dir"))
-    return maps, samples_per_map, output_dir
+    seed = _pick(args.seed, config_data.get("seed"))
+    return maps, samples_per_map, output_dir, seed
 
 
 def _resolve_training_args(
@@ -68,16 +69,20 @@ def _resolve_training_args(
         "learning_rate": _pick(args.lr, config_data.get("learning_rate"), defaults.learning_rate),
         "device": _pick(args.device, config_data.get("device"), defaults.device),
         "output_dir": _pick(args.output_dir, config_data.get("output_dir"), defaults.output_dir),
+        "seed": _pick(args.seed, config_data.get("seed")),
     }
 
 
 def _build_training_sources(
-    maps: Sequence[str] | None, samples_per_map: int | None, save_generated_data: str | None
+    maps: Sequence[str] | None,
+    samples_per_map: int | None,
+    save_generated_data: str | None,
+    seed: int | None,
 ) -> tuple[Sequence[str] | None, Sequence[tuple[Any, Any]] | None]:
     """Generate datasets from maps, optionally persisting them, and return archives or in-memory data."""
     if not maps:
         return None, None
-    datasets = create_training_data(maps, samples_per_map)
+    datasets = create_training_data(maps, samples_per_map, seed=seed)
     if save_generated_data:
         saved_paths = _save_generated_data(datasets, save_generated_data, maps)
         return [str(path) for path in saved_paths], None
@@ -101,6 +106,7 @@ def _configure_train_parser(subparsers) -> None:
         type=str,
         help="Directory to store generated training data archives (.npz).",
     )
+    train_parser.add_argument("--seed", type=int, help="Seed for reproducible generation/training.")
     train_parser.add_argument("--epochs", type=int)
     train_parser.add_argument("--batch-size", type=int)
     train_parser.add_argument("--lr", type=float)
@@ -123,19 +129,20 @@ def _configure_generate_parser(subparsers) -> None:
         "--output-dir",
         help="Directory to store generated training data archives (.npz).",
     )
+    gen_parser.add_argument("--seed", type=int, help="Seed for reproducible sampling.")
     gen_parser.set_defaults(func=_cmd_generate)
 
 
 def _cmd_generate(args: argparse.Namespace) -> None:
     """Handle the `generate` subcommand: produce archives from map files."""
     config_data = _load_config_data(args.config)
-    maps, samples_per_map, output_dir = _resolve_generation_args(args, config_data)
+    maps, samples_per_map, output_dir, seed = _resolve_generation_args(args, config_data)
     if not maps:
         raise SystemExit("Provide --maps or set maps in the config.")
     if not output_dir:
         raise SystemExit("Provide --output-dir or set output_dir in the config.")
 
-    datasets = create_training_data(maps, samples_per_map)
+    datasets = create_training_data(maps, samples_per_map, seed=seed)
     saved_paths = _save_generated_data(datasets, output_dir, maps)
     print(f"Generated {sum(inputs.shape[0] for inputs, _ in datasets)} samples across {len(datasets)} map(s).")
     print(f"Saved archives to {Path(output_dir).resolve()}")
@@ -154,6 +161,7 @@ def _build_training_config(
         learning_rate=params["learning_rate"],
         device=params["device"],
         output_dir=params["output_dir"],
+        seed=params["seed"],
     )
 
 
@@ -165,7 +173,7 @@ def _cmd_train(args: argparse.Namespace) -> None:
 
     train_archives = list(params["train_archives"] or [])
     generated_archives, in_memory_train_data = _build_training_sources(
-        params["maps"], params["samples_per_map"], params["save_generated_data"]
+        params["maps"], params["samples_per_map"], params["save_generated_data"], params["seed"]
     )
     if generated_archives:
         train_archives.extend(generated_archives)

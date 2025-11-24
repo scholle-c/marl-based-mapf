@@ -13,7 +13,7 @@ from .mapf_utils import get_grid, get_neighbors
 
 
 def create_training_data(
-    map_file_paths: List[str], n_samples: int | None = None
+    map_file_paths: List[str], n_samples: int | None = None, seed: int | None = None
 ) -> List[tuple[np.ndarray, np.ndarray]]:
     """
     Load maps and generate training data for each map.
@@ -26,6 +26,8 @@ def create_training_data(
     n_samples:
         Optional number of samples to draw per map. If `None`, one sample is
         created for every accessible position.
+    seed:
+        Optional seed for the random number generator to make sampling reproducible.
 
     Returns
     -------
@@ -34,7 +36,8 @@ def create_training_data(
     """
 
     grids = (_load_grid(path) for path in map_file_paths)
-    return [create_training_data_for_map(grid, n_samples) for grid in grids]
+    rng = np.random.default_rng(seed)
+    return [create_training_data_for_map(grid, n_samples, rng) for grid in grids]
 
 
 def _load_grid(path: str):
@@ -57,6 +60,7 @@ def _parse_args():
         type=int,
         help="Optional number of samples to generate per map.",
     )
+    parser.add_argument("--seed", type=int, help="Optional RNG seed for reproducible sampling.")
     return parser.parse_args()
 
 
@@ -122,7 +126,7 @@ def create_distance_table(grid: np.ndarray, goal_coordinate: tuple[int, int]) ->
 
 
 def create_training_data_for_map(
-    grid, n_samples: int | None = None
+    grid, n_samples: int | None = None, rng: np.random.Generator | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate input/label pairs for a single map by creating distance tables for all accessible positions.
@@ -136,6 +140,9 @@ def create_training_data_for_map(
         for each accessible position on the map. When provided, goal positions
         are drawn uniformly across accessible positions and paired with random
         starts.
+    rng:
+        Optional NumPy Generator to control randomness; if not provided, a new
+        generator is created.
 
     Returns
     -------
@@ -154,7 +161,7 @@ def create_training_data_for_map(
         raise ValueError("n_samples must be non-negative.")
 
     map_channel = grid.astype(np.int8, copy=False)
-    rng = np.random.default_rng()
+    rng = rng or np.random.default_rng()
 
     input_samples: list[np.ndarray] = []
     label_samples: list[np.ndarray] = []
@@ -237,7 +244,7 @@ def load_training_data(filepath: str | Path) -> tuple[np.ndarray, np.ndarray]:
 
 if __name__ == "__main__":
     args = _parse_args()
-    datasets = create_training_data(args.maps, args.samples_per_map)
+    datasets = create_training_data(args.maps, args.samples_per_map, seed=args.seed)
     total_samples = sum(inputs.shape[0] for inputs, _ in datasets)
     print(f"Created training data for {len(datasets)} maps with {total_samples} samples")
     

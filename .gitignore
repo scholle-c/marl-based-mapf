@@ -62,3 +62,6 @@ coverage.xml
 
 # Project specific
 data/
+output/
+configs/
+assets/

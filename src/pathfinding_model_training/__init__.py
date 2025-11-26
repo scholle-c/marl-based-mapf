@@ -1,5 +1,5 @@
+from pathfinding_model import DistanceTableCNN, load_model
 from .distance_table_prediction import (
-    DistanceTableCNN,
     DistanceTableDataset,
     TrainingConfig,
     compute_loss,
@@ -20,6 +20,7 @@ from .training_data_generation import (
 
 __all__ = [
     "DistanceTableCNN",
+    "load_model",
     "DistanceTableDataset",
     "TrainingConfig",
     "compute_loss",

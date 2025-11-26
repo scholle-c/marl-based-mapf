@@ -10,13 +10,9 @@ import torch
 from matplotlib import cm
 from torchviz import make_dot
 
-from value_map_learner import (
-    DistanceTableCNN,
-    DistanceTableDataset,
-    evaluate,
-    pad_collate,
-)
-from value_map_learner.mapf_utils import get_grid
+from pathfinding_model import DistanceTableCNN, load_model
+from pathfinding_model_training import DistanceTableDataset, evaluate, pad_collate
+from pathfinding_model_training.mapf_utils import get_grid
 
 
 def _load_histories(paths: Sequence[str | Path]) -> list[dict[str, list[float]]]:
@@ -86,11 +82,7 @@ def plot_loss_curve(
 
 
 def _prepare_model(model_path: str | Path, device: torch.device) -> DistanceTableCNN:
-    model = DistanceTableCNN().to(device)
-    state_dict = torch.load(model_path, map_location=device)
-    model.load_state_dict(state_dict)
-    model.eval()
-    return model
+    return load_model(model_path, device=device)
 
 
 def _build_input_tensor(grid: np.ndarray, goal: tuple[int, int]) -> torch.Tensor:

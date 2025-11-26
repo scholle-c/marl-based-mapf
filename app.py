@@ -1,6 +1,6 @@
-"""Legacy entry point; forwards to the new CLI."""
+"""Legacy entry point; forwards to the training CLI."""
 
-from value_map_learner.cli import main
+from pathfinding_model_training.cli import main
 
 
 if __name__ == "__main__":

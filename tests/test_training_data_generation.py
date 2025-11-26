@@ -1,6 +1,6 @@
 import numpy as np
 
-from value_map_learner.training_data_generation import (
+from pathfinding_model_training.training_data_generation import (
     create_distance_table,
     create_training_data_for_map,
     get_all_possible_map_positions,

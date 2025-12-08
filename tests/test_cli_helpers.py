@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pathfinding_model_training.cli import _save_generated_data
+from pathfinding_model_pretraining.cli import _save_generated_data
 
 
 def test_save_generated_data_uses_map_stems(tmp_path):

@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from .mapf_utils import Coord, Grid, get_neighbors, is_valid_coord
-from pathfinding_model import load_model, DistanceTableCNN, build_input_tensor
+from pathfinding_model import DistanceTableCNN, build_input_tensor
 
 
 @dataclass

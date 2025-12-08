@@ -11,8 +11,8 @@ from matplotlib import cm
 from torchviz import make_dot
 
 from pathfinding_model import DistanceTableCNN, load_model
-from pathfinding_model_training import DistanceTableDataset, evaluate, pad_collate
-from pathfinding_model_training.mapf_utils import get_grid
+from pathfinding_model_pretraining import DistanceTableDataset, evaluate, pad_collate
+from pathfinding_model_pretraining.mapf_utils import get_grid
 
 
 def _load_histories(paths: Sequence[str | Path]) -> list[dict[str, list[float]]]:

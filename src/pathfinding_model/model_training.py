@@ -42,24 +42,24 @@ def train_on_solution(model: DistanceTableCNN, optimizer: torch.optim.Optimizer,
         input_tensor = build_input_tensor(map, goal, start).to(device)
         dist_table = model(input_tensor).squeeze(0).squeeze(0)
 
-        for t in range(1, num_time_steps):
-            current_config = solution[t - 1]
-            next_config = solution[t]
+        for t in range(num_time_steps, 1, -1):
+            current_config = solution[t]
+            prev_config = solution[t - 1]
 
             pos_t = current_config[agent_idx]
-            pos_t1 = next_config[agent_idx]
+            pos_t_prev = prev_config[agent_idx]
 
             v_t = dist_table[pos_t]
-            v_t1 = dist_table[pos_t1]
+            v_t_prev = dist_table[pos_t_prev]
 
             # goal handling: if s_t is already the goal, target=0
             if pos_t == goal:
-                target = torch.tensor(0.0, device=device)
+                target = torch.tensor(0.0, device=device) + 1
             else:
-                target = 1.0 + v_t1.detach()
+                target = 1.0 + v_t.detach()
             
             num_samples += 1
-            loss = (v_t - target) ** 2
+            loss = (v_t_prev - target) ** 2
             total_loss += loss
 
     mean_loss = total_loss / num_samples

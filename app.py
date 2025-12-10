@@ -50,7 +50,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-file",
         type=Path,
-        default=Path(__file__).parent / "assets" / "models" / "first_model" / "model.pt",
+        default=None,
         help="path to a pretrained distance table CNN model",
     )
 

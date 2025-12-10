@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from loguru import logger
+from typing import Optional
 
 from .dist_table import DistTable
 from .mapf_utils import Config, Configs, Coord, Deadline, Grid, get_neighbors
@@ -55,7 +56,7 @@ class LaCAM:
         grid: Grid,
         starts: Config,
         goals: Config,
-        model: DistanceTableCNN,
+        model: Optional[DistanceTableCNN] = None,
         time_limit_ms: int = 3000,
         deadline: Deadline | None = None,
         flg_star: bool = True,
@@ -67,7 +68,7 @@ class LaCAM:
         self.grid: Grid = grid
         self.starts: Config = starts
         self.goals: Config = goals
-        self.model: DistanceTableCNN = model
+        self.model: Optional[DistanceTableCNN] = model
         self.deadline: Deadline = (
             deadline if deadline is not None else Deadline(time_limit_ms)
         )

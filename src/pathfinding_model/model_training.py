@@ -71,7 +71,12 @@ def train_on_solution(model: DistanceTableCNN, optimizer: torch.optim.Optimizer,
 
 def get_soc(solution: Configs) -> int:
     """
-    Compute the sum of costs (SOC) of a MAPF solution.
+    Compute the sum of costs (SOC) of a MAPF solution. You look for each agent
+    for the last time step where the agent moves. Waiting is added to the cost,
+    if the agent hasn't reached its goal yet. If the agent reached its goal, waiting
+    at the goal does not add to the cost except if the agent has to move again later.
+
+    All those individual costs are summed up to get the SOC.
 
     Args:
         solution: MAPF solution as a list of configurations.
@@ -79,12 +84,14 @@ def get_soc(solution: Configs) -> int:
     Returns:
         Sum of costs of the solution.
     """
+    # TODO: SOC ggf anpassen, sodass es gleich von LaCAM ist. Warte auf nächstes Meeting. 
     soc = 0
     num_agents = len(solution[0])
     for agent_idx in range(num_agents):
         # Find the last time step where the agent moves
         last_step = 0
-        for t in range(len(solution)):
+
+        for t in range(1, len(solution)):
             if solution[t][agent_idx] != solution[t - 1][agent_idx]:
                 last_step = t
         soc += last_step

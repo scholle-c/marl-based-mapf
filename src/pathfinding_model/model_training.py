@@ -36,13 +36,15 @@ def train_on_solution(model: DistanceTableCNN, optimizer: torch.optim.Optimizer,
     num_agents = len(starts)
     num_time_steps = len(solution)
 
+    # TODO: Improve training by using two tensors: one containing the values and another containing the targets. This way, we can compute the loss in a vectorized manner.
+    # TODO: For each step of an agent, look at all neighbors and compute the target value of that neighbor as min(neighbor_values) + 1. Check if the neighbor is inside the map! You could also do the following: 0. Mask the distance table with the map layout 1. Copy the distance table 2. Replace values inside the path with the path distances from the agent 3. calculate the target values for the neighbors 4. Compute loss in a vectorized manner
     for agent_idx in range(num_agents):
         start = starts[agent_idx]
         goal = goals[agent_idx]
         input_tensor = build_input_tensor(map, goal, start).to(device)
         dist_table = model(input_tensor).squeeze(0).squeeze(0)
 
-        for t in range(num_time_steps, 1, -1):
+        for t in range(num_time_steps - 1, 0, -1):
             current_config = solution[t]
             prev_config = solution[t - 1]
 

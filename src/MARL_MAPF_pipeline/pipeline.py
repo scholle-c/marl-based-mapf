@@ -14,12 +14,31 @@ import json
 def run_pipeline(args: argparse.Namespace) -> None:
     if args.model_file is not None:
         model: DistanceTableCNN = load_model(args.model_file)
-    else:
+    elif not args.use_lacam_only:
+        # TODO: Train this model so that it outputs distance tables with max distance in each cell
         model = DistanceTableCNN(lr=args.lr)
 
     # define problem instance
     grid = get_grid(args.map_file)
     starts, goals = get_scenario(args.scen_file, args.num_agents)
+
+    if args.use_lacam_only:
+        # Use LaCAM only without training or model
+        planner = LaCAM()
+        solution = planner.solve(
+            grid=grid,
+            starts=starts,
+            goals=goals,
+            model=None,
+            seed=args.seed,
+            time_limit_ms=args.time_limit_ms,
+            flg_star=args.flg_star,
+            verbose=args.verbose,
+        )
+        validate_mapf_solution(grid, starts, goals, solution)
+        soc = get_soc(solution)
+        print(f"LaCAM only SOC: {soc}")
+        return
 
     socs = []
     losses = []

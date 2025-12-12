@@ -37,7 +37,8 @@ CLI flags override values in the TOML config. Available arguments:
 | `-v, --verbose` | Verbosity level for logging. | `1` |
 | `-s, --seed` | Random seed for the LaCAM planner. | `0` |
 | `-t, --time_limit_ms` | Time limit (milliseconds) for the planner. | `1000` |
-| `--model-file` | Pretrained distance table CNN checkpoint. If not provided, the LaCAM Algorithm will use its default distance table and behave like the original algorithm | `None` |
+| `--use-lacam-only, --no-use-lacam-only` | When activated, lacam will run without the rl-training part. | `--no-use-lacam-only` |
+| `--model-file` | Pretrained distance table CNN checkpoint. If not provided, a new CNN model is created that is initially trined to always predict the max-distance (=map-size) | `None` |
 | `--epochs` | Training epochs for the distance table CNN. | `100` |
 | `--lr` | Learning rate for training the distance table CNN. | `0.001` |
 | `--device` | Compute device for training (e.g., `cpu`, `cuda`). | `cpu` |

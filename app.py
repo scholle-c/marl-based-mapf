@@ -6,6 +6,7 @@ from MARL_MAPF_pipeline.pipeline import run_pipeline
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    
     parser.add_argument(
         "-c",
         "--config-file",
@@ -46,6 +47,13 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--seed", type=int, default=0)
 
     parser.add_argument("-t", "--time_limit_ms", type=int, default=1000)
+
+    parser.add_argument(
+        "--use-lacam-only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="if set, use LaCAM only without training or using a distance table CNN model",
+    )
 
     parser.add_argument(
         "--model-file",

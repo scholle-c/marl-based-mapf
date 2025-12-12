@@ -9,35 +9,21 @@ from pycam import (
 import torch
 import os
 import json
+from .constants import TRAIN_MODE_MODEL, TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
     if args.model_file is not None:
         model: DistanceTableCNN = load_model(args.model_file)
-    elif not args.use_lacam_only:
+    elif args.training_mode != TRAIN_MODE_LACAM_ONLY:
         # TODO: Train this model so that it outputs distance tables with max distance in each cell
         model = DistanceTableCNN(lr=args.lr)
 
-    # define problem instance
     grid = get_grid(args.map_file)
     starts, goals = get_scenario(args.scen_file, args.num_agents)
 
-    if args.use_lacam_only:
-        # Use LaCAM only without training or model
-        planner = LaCAM()
-        solution = planner.solve(
-            grid=grid,
-            starts=starts,
-            goals=goals,
-            model=None,
-            seed=args.seed,
-            time_limit_ms=args.time_limit_ms,
-            flg_star=args.flg_star,
-            verbose=args.verbose,
-        )
-        validate_mapf_solution(grid, starts, goals, solution)
-        soc = get_soc(solution)
-        print(f"LaCAM only SOC: {soc}")
+    if args.training_mode == TRAIN_MODE_LACAM_ONLY:
+        _run_lacam_only(args)
         return
 
     socs = []
@@ -50,6 +36,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
         # solve MAPF
         planner = LaCAM()
+        
         solution = planner.solve(
             grid=grid,
             starts=starts,
@@ -61,6 +48,26 @@ def run_pipeline(args: argparse.Namespace) -> None:
             verbose=args.verbose,
         )
         validate_mapf_solution(grid, starts, goals, solution)
+
+        if args.training_mode == TRAIN_MODE_BEST:
+            # Solve again without model
+            solution_no_model = planner.solve(
+                grid=grid,
+                starts=starts,
+                goals=goals,
+                model=None,
+                seed=args.seed + epoch,
+                time_limit_ms=args.time_limit_ms,
+                flg_star=args.flg_star,
+                verbose=args.verbose,
+            )
+            validate_mapf_solution(grid, starts, goals, solution_no_model)
+
+            soc_with_model = get_soc(solution)
+            soc_without_model = get_soc(solution_no_model)
+
+            if soc_without_model < soc_with_model:
+                solution = solution_no_model
 
         soc = get_soc(solution)
         socs.append(soc)
@@ -79,3 +86,29 @@ def run_pipeline(args: argparse.Namespace) -> None:
         json_path = os.path.join(args.output_dir, "training_stats.json")
         with open(json_path, "w") as f:
             json.dump({"socs": socs, "losses": losses}, f)
+
+def _run_lacam_only(args: argparse.Namespace) -> None:
+    """
+    Run LaCAM once without any rl training or using a distance table CNN model.
+
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+    """
+    # define problem instance
+    grid = get_grid(args.map_file)
+    starts, goals = get_scenario(args.scen_file, args.num_agents)
+
+    planner = LaCAM()
+    solution = planner.solve(
+        grid=grid,
+        starts=starts,
+        goals=goals,
+        model=None,
+        seed=args.seed,
+        time_limit_ms=args.time_limit_ms,
+        flg_star=args.flg_star,
+        verbose=args.verbose,
+    )
+    validate_mapf_solution(grid, starts, goals, solution)
+    soc = get_soc(solution)
+    print(f"LaCAM only SOC: {soc}")

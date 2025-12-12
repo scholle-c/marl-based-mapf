@@ -49,10 +49,12 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--time_limit_ms", type=int, default=1000)
 
     parser.add_argument(
-        "--use_lacam_only",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="if set, use LaCAM only without training or using a distance table CNN model",
+        "--training_mode",
+        type=str,
+        default="model",
+        help="Choose between: 'model' (train with model-based solutions), "
+        "'lacam_only' (no training, just one LaCAM execution), and 'best' "
+        "(take best solution from either LaCAM or model per epoch). Default: 'model'",
     )
 
     parser.add_argument(

@@ -13,14 +13,14 @@ from .constants import TRAIN_MODE_MODEL, TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
+    grid = get_grid(args.map_file)
+    starts, goals = get_scenario(args.scen_file, args.num_agents)
+
     if args.model_file is not None:
         model: DistanceTableCNN = load_model(args.model_file)
     elif args.training_mode != TRAIN_MODE_LACAM_ONLY:
-        # TODO: Train this model so that it outputs distance tables with max distance in each cell
         model = DistanceTableCNN(lr=args.lr)
-
-    grid = get_grid(args.map_file)
-    starts, goals = get_scenario(args.scen_file, args.num_agents)
+        model.set_default_output_value(grid.size)
 
     if args.training_mode == TRAIN_MODE_LACAM_ONLY:
         _run_lacam_only(args)

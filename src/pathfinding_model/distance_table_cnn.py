@@ -31,6 +31,17 @@ class DistanceTableCNN(nn.Module):
         """Forward pass: (batch, 3, H, W) -> (batch, 1, H, W)."""
         return self.network(x)
 
+    def set_default_output_value(self, value: float) -> None:
+        """
+        Set the bias of the last convolutional layer to a constant value.
+
+        This makes the network output a constant value when the input is zero.
+        """
+        last_conv: nn.Conv2d = self.network[-1]
+        with torch.no_grad():
+            last_conv.weight.zero_()
+            last_conv.bias.fill_(value)
+
     def get(self, start: tuple[int, int], goal: tuple[int, int], grid: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:
         """
         Predict a distance/value table for the provided map, start, and goal.

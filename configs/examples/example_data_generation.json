@@ -1,9 +1,0 @@
-{
-  "maps": [
-    "assets/connector.map",
-    "assets/corners.map"
-  ],
-  "samples_per_map": 200,
-  "output_dir": "data/generated",
-  "seed": 123
-}

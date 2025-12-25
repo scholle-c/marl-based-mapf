@@ -3,3 +3,5 @@ torch
 torchvision
 torchviz
 matplotlib
+loguru
+pytest

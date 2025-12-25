@@ -22,7 +22,7 @@ def _load_stats(path: str) -> Tuple[List[float], List[float]]:
 
     with open(target_path, "r") as f:
         stats = json.load(f)
-    return stats["socs"], stats["losses"]
+    return stats["socs"], stats["losses"], stats.get("soc_model", []), stats.get("soc_no_model", []), stats
 
 
 def _align_runs(runs: Iterable[List[float]]) -> List[List[float]]:
@@ -52,31 +52,49 @@ def _aggregate(values: List[List[float]]) -> Tuple[List[float], List[float], Lis
 def plot_training_stats(stats_paths: List[str]) -> None:
     soc_runs = []
     loss_runs = []
+    soc_model = []
+    soc_no_model = []
     for path in stats_paths:
-        socs, losses = _load_stats(path)
+        socs, losses, current_soc_model, current_soc_no_model, raw_data = _load_stats(path)
         soc_runs.append(socs)
         loss_runs.append(losses)
+        soc_model.append(current_soc_model) if current_soc_model else None
+        soc_no_model.append(current_soc_no_model) if current_soc_no_model else None
 
     single_run = len(soc_runs) == 1
+    used_best_mode = bool(len(soc_model) > 0 and len(soc_no_model) > 0)
     soc_runs = _align_runs(soc_runs)
     loss_runs = _align_runs(loss_runs)
     epochs = list(range(1, len(soc_runs[0]) + 1))
 
     plt.figure(figsize=(12, 5))
 
-    plt.subplot(1, 2, 1)
+    plt.subplot(1, 3, 1)
     if single_run:
         plt.plot(epochs, soc_runs[0], marker="o", label="SOC")
+        if used_best_mode:
+            plt.plot(epochs, soc_model[0], marker="x", label="SOC with Model")
+            plt.plot(epochs, soc_no_model[0], marker="x", label="SOC without Model")
     else:
         mean_socs, min_socs, max_socs = _aggregate(soc_runs)
-        plt.fill_between(epochs, min_socs, max_socs, alpha=0.2, color="skyblue", label="SOC range")
-        plt.plot(epochs, mean_socs, color="blue", linewidth=2, label="Mean SOC")
+        #plt.plot(epochs, mean_socs, color="blue", linewidth=2, label="Mean SOC")
+        if used_best_mode:
+            soc_model = _align_runs(soc_model)
+            soc_no_model = _align_runs(soc_no_model)
+            mean_soc_model, min_soc_model, max_soc_model = _aggregate(soc_model)
+            mean_soc_no_model, min_soc_no_model, max_soc_no_model = _aggregate(soc_no_model)
+            plt.fill_between(epochs, min_soc_model, max_soc_model, alpha=0.2, color="lightgreen", label="SOC with Model range")
+            plt.fill_between(epochs, min_soc_no_model, max_soc_no_model, alpha=0.2, color="lightcoral", label="SOC without Model range")
+            plt.plot(epochs, mean_soc_model, color="green", linewidth=2, label="Mean SOC with Model")
+            plt.plot(epochs, mean_soc_no_model, color="red", linewidth=2, label="Mean SOC without Model")
+        else:
+            plt.fill_between(epochs, min_socs, max_socs, alpha=0.2, color="skyblue", label="SOC range")
     plt.title("Sum of Costs (SOC) over Epochs")
     plt.xlabel("Epoch")
     plt.ylabel("SOC")
     plt.legend()
 
-    plt.subplot(1, 2, 2)
+    plt.subplot(1, 3, 2)
     if single_run:
         plt.plot(epochs, loss_runs[0], marker="o", color="orange", label="Loss")
     else:
@@ -88,6 +106,14 @@ def plot_training_stats(stats_paths: List[str]) -> None:
     plt.xlabel("Epoch")
     plt.ylabel("Mean Loss")
     plt.legend()
+
+    if single_run and used_best_mode:
+        plt.subplot(1, 3, 3)
+        plt.plot(epochs, raw_data["dist_table_differences"], marker="o", color="purple", label="Distance Table Differences")
+        plt.title("Distance Table Differences over Epochs")
+        plt.xlabel("Epoch")
+        plt.ylabel("Mean Absolute Difference")
+        plt.legend()
 
     plt.tight_layout()
     plt.show()

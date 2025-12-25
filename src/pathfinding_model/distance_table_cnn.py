@@ -39,7 +39,6 @@ class DistanceTableCNN(nn.Module):
         """
         last_conv: nn.Conv2d = self.network[-1]
         with torch.no_grad():
-            last_conv.weight.zero_()
             last_conv.bias.fill_(value)
 
     def get(self, start: tuple[int, int], goal: tuple[int, int], grid: Sequence[Sequence[float]] | np.ndarray) -> np.ndarray:

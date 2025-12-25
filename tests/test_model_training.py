@@ -1,6 +1,14 @@
 import pytest
 
 from pathfinding_model.model_training import get_soc
+import torch
+import numpy as np
+from pathfinding_model.model_utils import build_random_input_tensor
+from pathfinding_model.distance_table_cnn import DistanceTableCNN
+from pathfinding_model.model_training import pretrain_model_on_default_value
+
+
+SKIP_PRETRAIN_TEST = True
 
 
 def test_get_soc():
@@ -25,3 +33,29 @@ def test_get_soc():
 
     soc = get_soc(solution)
     assert soc == expected_soc
+
+def test_pretrain_model_on_default_value():
+    if SKIP_PRETRAIN_TEST:
+        pytest.skip("Skipping pretrain model test to save time.")
+    
+    # arrange
+    model = DistanceTableCNN()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    grid_array = np.array([
+        [0, 1, 1],
+        [0, 0, 0],
+        [0, 1, 1],
+        [0, 1, 1],
+    ], dtype=np.int64)
+    default_value = 9
+
+    # act
+    pretrain_model_on_default_value(model, grid_array, optimizer, default_value=default_value, num_epochs=1000)
+
+    # assert
+    model.eval()
+    with torch.no_grad():
+        random_input = build_random_input_tensor(grid_array)
+        output = model(random_input).squeeze().cpu().numpy()
+        mean_output_value = np.mean(output)
+        assert np.isclose(mean_output_value, default_value, atol=1.0), f"Mean output value {mean_output_value} not close to default value {default_value}"

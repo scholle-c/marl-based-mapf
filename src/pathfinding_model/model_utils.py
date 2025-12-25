@@ -3,8 +3,10 @@
 """
 import numpy as np
 import torch
+from typing import Tuple
+from mapf_utils import Grid
 
-def build_input_tensor(grid: np.ndarray, goal: tuple[int, int], start: tuple[int, int]) -> torch.Tensor:
+def build_input_tensor(grid: Grid, goal: tuple[int, int], start: tuple[int, int]) -> torch.Tensor:
     if grid.ndim != 2:
         raise ValueError("Grid must be a 2D array.")
     if not grid[goal]:
@@ -19,4 +21,14 @@ def build_input_tensor(grid: np.ndarray, goal: tuple[int, int], start: tuple[int
     start_channel[start] = 1.0
 
     stacked = np.stack((map_channel, goal_channel, start_channel), axis=0)
+    return torch.from_numpy(stacked).unsqueeze(0) 
+
+
+def build_random_input_tensor(grid: Grid) -> torch.Tensor:
+    input: np.ndarray = np.random.random(grid.shape)
+    map_channel = np.random.random(grid.shape)
+    goal_channel = np.random.random(grid.shape)
+    start_channel = np.random.random(grid.shape)
+
+    stacked = np.stack((map_channel, goal_channel, start_channel), axis=0, dtype=np.float32)
     return torch.from_numpy(stacked).unsqueeze(0) 

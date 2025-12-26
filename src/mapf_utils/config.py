@@ -48,4 +48,3 @@ def load_config(path: str | Path) -> dict[str, Any]:
             return yaml.safe_load(f)
 
     raise ValueError(f"Unsupported config format for {config_path}. Use JSON, TOML, or YAML.")
-

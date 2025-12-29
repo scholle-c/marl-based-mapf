@@ -2,31 +2,59 @@
 
 This repository contains an experimental environment for trying to combine MAPF (using the LaCAM algorithm) with MARL.
 
-## Development Environment
-
-- **Python:** 1.13.2 (use a virtual environment, e.g., `.venv`)
-- **Package manager:** `pip`
-
 ## Setup
 
-1. Install Python 1.13.2.
-2. Create a virtual environment:
+1. Install Python with a version >= 3.10
+2. (Optional) Create a virtual environment:
    - `python -m venv .venv`
 3. Activate the environment:
    - PowerShell: `.\.venv\Scripts\Activate.ps1`
    - bash: `source .venv/bin/activate`
-4. Install dependencies:
-   - `pip install -r requirements.txt`
+4. Install the marl-mapf-pipe-package via:
+   - `pip install .`
+   - for development: `pip install .[dev]`
 
 ## Usage
 
-Run the end-to-end MAPF pipeline from the project root:
+If you want to try out the project quickly, you can use the provided map and config file.
+You can find them in the `assets` and `configs` folders to run the pipeline quickly.
+
+Just type in the terminal while having your venv active:
 
 ```console
-python app.py --config-file configs/default_config.toml
+mapf-pipe --config-file configs/default_config.toml
 ```
 
-CLI flags override values in the TOML config. Available arguments:
+If you want to use the pipeline on another map with your own configurations, you
+need to follow a few quick steps beforehand:
+
+### 1. Provide a map and scene file
+
+- You can find already created maps and scenarios at the [Moving AI MAPF Benchmarks](https://movingai.com/benchmarks/mapf/index.html), or create your own in the same scheme
+- Put the `.map` and `.scen` files in a folder, preferably somewhere in the `assets` folder
+
+### 2. Create a config file
+
+- Navigate to the `configs` folder
+- The easiest way is to copy the existing default config and replace the existing values with your own
+- The most important parameters are:
+  - `map_file`: Path to your `.map` file
+  - `scen_file`: Path to your `.scen` file
+  - `num_agents`: How many agents should be present. Cannot be more than the ones defined in the `.scen` file
+- You can delete parameters that you don't want to change; the program will assign them default values.
+- You can find a list of all possible parameters in the [Arguments for Configuration or the CLI](#arguments-for-configuration-or-the-cli) section
+
+Example snippet:
+
+```toml
+map_file = "assets/my_map.map"
+scen_file = "assets/my_map.scen"
+num_agents = 8
+seed = 42
+output_folder = "output/my_run"
+```
+
+## Arguments for Configuration or the CLI
 
 | Argument | Description | Default value |
 | --- | --- | --- |
@@ -38,7 +66,7 @@ CLI flags override values in the TOML config. Available arguments:
 | `-s, --seed` | Random seed for the LaCAM planner. | `0` |
 | `-t, --time_limit_ms` | Time limit (milliseconds) for the planner. | `1000` |
 | `--training_mode` | Choose between: 'model' (train with model-based solutions), 'lacam_only' (no training, just one LaCAM execution), and 'best' (take best solution from either LaCAM or model per epoch). | `model` |
-| `--model-file` | Pretrained distance table CNN checkpoint. If not provided, a new CNN model is created that is initially trined to always predict the max-distance (=map-size) | `None` |
+| `--model-file` | Pretrained distance table CNN checkpoint. If not provided, a new CNN model is created that is initially trained to always predict the max-distance (=map-size) | `None` |
 | `--epochs` | Training epochs for the distance table CNN. | `100` |
 | `--lr` | Learning rate for training the distance table CNN. | `0.001` |
 | `--device` | Compute device for training (e.g., `cpu`, `cuda`). | `cpu` |

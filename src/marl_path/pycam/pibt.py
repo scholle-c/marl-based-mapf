@@ -6,7 +6,7 @@ https://github.com/Kei18/pypibt
 import numpy as np
 
 from .dist_table import DistTable
-from .mapf_utils import Config, Coord, get_neighbors
+from marl_path.shared.mapf_utils import Config, Coord, get_neighbors
 
 
 class PIBT:
@@ -73,7 +73,7 @@ class PIBT:
         flg_success = True
 
         # setup
-        for i, (v_i_from, v_i_to) in enumerate(zip(Q_from, Q_to)):
+        for i, (v_i_from, v_i_to) in enumerate(zip(Q_from, Q_to)):  # type: ignore
             self.occupied_now[v_i_from] = i
             if v_i_to != self.NIL_COORD:
                 #  check vertex collision
@@ -82,7 +82,7 @@ class PIBT:
                     break
                 # check edge collision
                 j = self.occupied_now[v_i_to]
-                if j != self.NIL and j != i and Q_to[j] == v_i_from:
+                if j != self.NIL and j != i and Q_to[j] == v_i_from:  # type: ignore
                     flg_success = False
                     break
                 self.occupied_nxt[v_i_to] = i
@@ -96,7 +96,7 @@ class PIBT:
                         break
 
         # cleanup
-        for q_from, q_to in zip(Q_from, Q_to):
+        for q_from, q_to in zip(Q_from, Q_to):  # type: ignore
             self.occupied_now[q_from] = self.NIL
             if q_to != self.NIL_COORD:
                 self.occupied_nxt[q_to] = self.NIL

@@ -1,17 +1,44 @@
-[project]
-name = "pathfinding-model-training"
-version = "0.1.0"
-description = ""
-readme = "README.md"
-requires-python = ">=3.10"
-dependencies = []
-
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+
+[project]
+name = "marl-path"
+version = "0.1.0"
+description = "Research project, that tries to improve the LaCAM algorithm by using multi agent reinforcement learning"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Carsten Scholle", email = "carsten.scholle@gmail.com"}]
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchviz",
+    "loguru",
+    "matplotlib"
+]
+
+
+[project.optional-dependencies]
+dev =  [
+    "pytest",
+    "pre-commit"
+]
+
+
+[project.urls]
+Repository = "https://github.com/scholle-c/marl-based-mapf"
+
+
+[project.scripts]
+marl-path = "marl_path.cli:main"
+marl-path-plot = "marl_path.model.plotting:main"
+
+
 [tool.setuptools]
 package-dir = {"" = "src"}
+
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,30 +1,30 @@
 import argparse
 from pathlib import Path
-from pathfinding_model_pretraining import load_config
-from MARL_MAPF_pipeline.pipeline import run_pipeline
+from marl_path.shared.config import load_config
+from .pipeline import run_pipeline
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "-c",
         "--config-file",
         type=Path,
-        default=Path(__file__).parent / "configs" / "default_config.toml",
+        default=Path(__file__).parent.parent.parent / "configs" / "default_config.toml",
     )
 
     parser.add_argument(
         "-m",
         "--map-file",
         type=Path,
-        default=Path(__file__).parent / "assets" / "tunnel.map",
+        default=Path(__file__).parent.parent.parent / "assets" / "tunnel.map",
     )
     parser.add_argument(
         "-i",
         "--scen-file",
         type=Path,
-        default=Path(__file__).parent / "assets" / "tunnel.scen",
+        default=Path(__file__).parent.parent.parent / "assets" / "tunnel.scen",
     )
     parser.add_argument(
         "-N",
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--output-folder",
+        "--output-dir",
         type=Path,
         default=Path(__file__).parent / "output",
         help="path to save metrics and results of the training and evaluation.",
@@ -99,10 +99,13 @@ if __name__ == "__main__":
         help="random seed for training the distance table CNN model.",
     )
 
-
     args = parser.parse_args()
     if args.config_file is not None:
         config = load_config(args.config_file)
         args.__dict__.update(config)
 
     run_pipeline(args)
+
+
+if __name__ == "__main__":
+    main()

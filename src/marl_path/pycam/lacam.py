@@ -8,10 +8,18 @@ from loguru import logger
 from typing import Optional
 
 from .dist_table import DistTable
-from .mapf_utils import Config, Configs, Coord, Deadline, Grid, get_neighbors
+from marl_path.shared.mapf_utils import (
+    Config,
+    Configs,
+    Coord,
+    Deadline,
+    Grid,
+    get_neighbors,
+)
 from .pibt import PIBT
 
-from pathfinding_model import DistanceTableCNN
+from marl_path.model.definition import DistanceTableCNN
+
 
 @dataclass
 class LowLevelNode:
@@ -82,7 +90,9 @@ class LaCAM:
         self.info(1, "start solving MAPF")
 
         # set distance tables
-        self.dist_tables = [DistTable(self.grid, g, model=self.model) for g in self.goals]
+        self.dist_tables = [
+            DistTable(self.grid, g, model=self.model) for g in self.goals
+        ]
         self.pibt = PIBT(self.dist_tables)
 
         # set search scheme
@@ -200,7 +210,7 @@ class LaCAM:
     def get_h_value(self, Q: Config) -> int:
         # e.g., \sum_i dist(Q[i], g_i)
         cost = 0
-        for agent_idx, loc in enumerate(Q):
+        for agent_idx, loc in enumerate(Q):  # type: ignore
             c = self.dist_tables[agent_idx].get(loc)
             if c is None:
                 return np.iinfo(np.int32).max

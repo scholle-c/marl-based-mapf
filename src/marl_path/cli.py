@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
-from mapf_utils import load_config
-from MARL_MAPF_pipeline.pipeline import run_pipeline
+from marl_path.shared.config import load_config
+from .pipeline import run_pipeline
 
 
 def main():
@@ -86,7 +86,7 @@ def main():
     )
 
     parser.add_argument(
-        "--output-folder",
+        "--output-dir",
         type=Path,
         default=Path(__file__).parent / "output",
         help="path to save metrics and results of the training and evaluation.",
@@ -98,7 +98,6 @@ def main():
         default=0,
         help="random seed for training the distance table CNN model.",
     )
-
 
     args = parser.parse_args()
     if args.config_file is not None:

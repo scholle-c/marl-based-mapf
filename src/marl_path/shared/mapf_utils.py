@@ -153,14 +153,14 @@ def validate_mapf_solution(
     assert len(solution) > 0, "invalid solution, empty"
 
     # starts
-    assert all(
-        [u == v for (u, v) in zip(starts, solution[0])]
-    ), "invalid solution, check starts"
+    assert all([u == v for (u, v) in zip(starts, solution[0])]), (  # type: ignore
+        "invalid solution, check starts"
+    )
 
     # goals
-    assert all(
-        [u == v for (u, v) in zip(goals, solution[-1])]
-    ), "invalid solution, check goals"
+    assert all([u == v for (u, v) in zip(goals, solution[-1])]), (  # type: ignore
+        "invalid solution, check goals"
+    )
 
     T = len(solution)
     N = len(starts)
@@ -171,18 +171,18 @@ def validate_mapf_solution(
             v_i_pre = solution[max(t - 1, 0)][i]
 
             # check continuity
-            assert v_i_now in [v_i_pre] + get_neighbors(
-                grid, v_i_pre
-            ), "invalid solution, check connectivity"
+            assert v_i_now in [v_i_pre] + get_neighbors(grid, v_i_pre), (
+                "invalid solution, check connectivity"
+            )
 
             # check collision
             for j in range(i + 1, N):
                 v_j_now = solution[t][j]
                 v_j_pre = solution[max(t - 1, 0)][j]
                 assert not (v_i_now == v_j_now), "invalid solution, vertex collision"
-                assert not (
-                    v_i_now == v_j_pre and v_i_pre == v_j_now
-                ), "invalid solution, edge collision"
+                assert not (v_i_now == v_j_pre and v_i_pre == v_j_now), (
+                    "invalid solution, edge collision"
+                )
 
 
 def is_valid_mapf_solution(
@@ -205,7 +205,7 @@ def get_sum_of_loss(configs: Configs) -> int:
         cost += sum(
             [
                 not (v_from == v_to == goal)
-                for (v_from, v_to, goal) in zip(configs[t - 1], configs[t], configs[-1])
+                for (v_from, v_to, goal) in zip(configs[t - 1], configs[t], configs[-1])  # type: ignore
             ]
         )
     return cost

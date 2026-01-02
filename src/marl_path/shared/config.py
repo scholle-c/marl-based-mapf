@@ -35,7 +35,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
     if suffix == ".toml":
         if tomllib is None:
-            raise ImportError("tomllib is required to read TOML configs (Python 3.11+).")
+            raise ImportError(
+                "tomllib is required to read TOML configs (Python 3.11+)."
+            )
         with config_path.open("rb") as f:
             return tomllib.load(f)
 
@@ -47,4 +49,6 @@ def load_config(path: str | Path) -> dict[str, Any]:
         with config_path.open("r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
-    raise ValueError(f"Unsupported config format for {config_path}. Use JSON, TOML, or YAML.")
+    raise ValueError(
+        f"Unsupported config format for {config_path}. Use JSON, TOML, or YAML."
+    )

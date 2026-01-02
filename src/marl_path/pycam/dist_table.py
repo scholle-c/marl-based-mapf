@@ -5,8 +5,9 @@ import numpy as np
 import torch
 from typing import Optional
 
-from .mapf_utils import Coord, Grid, get_neighbors, is_valid_coord
-from pathfinding_model import DistanceTableCNN, build_input_tensor
+from marl_path.shared.mapf_utils import Coord, Grid, get_neighbors, is_valid_coord
+from marl_path.model.definition import DistanceTableCNN
+from marl_path.model.training import build_input_tensor
 
 
 @dataclass
@@ -39,17 +40,19 @@ class DistTable:
             return self.compute_table_bfs(target)
         else:
             self.has_model_generated = True
-            return self.compute_table_model(target)
-    
+            return self.compute_table_model(target)  # type: ignore
+
     def compute_table_model(self, target: Coord) -> None:
-        self.input_tensor: torch.Tensor = build_input_tensor(self.grid, self.goal, target)
+        self.input_tensor: torch.Tensor = build_input_tensor(
+            self.grid, self.goal, target
+        )
         with torch.no_grad():
-            output: torch.Tensor = self.model(self.input_tensor)
+            output: torch.Tensor = self.model(self.input_tensor)  # type: ignore
         dist_table: np.ndarray = output.squeeze(0).squeeze(0).cpu().numpy()
         dist_value: int = int(dist_table[target])
         self.table = dist_table.astype(int)
-        return dist_value
-    
+        return dist_value  # type: ignore
+
     def compute_table_bfs(self, target: Coord) -> int:
         while len(self.Q) > 0:
             u = self.Q.popleft()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "marl-based-mapf"
+name = "marl-path"
 version = "0.1.0"
 description = "Research project, that tries to improve the LaCAM algorithm by using multi agent reinforcement learning"
 readme = "README.md"
@@ -22,7 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev =  [
-    "pytest"
+    "pytest",
+    "pre-commit"
 ]
 
 
@@ -31,7 +32,8 @@ Repository = "https://github.com/scholle-c/marl-based-mapf"
 
 
 [project.scripts]
-mapf-pipe = "MARL_MAPF_pipeline.cli:main"
+marl-path = "marl_path.cli:main"
+marl-path-plot = "marl_path.model.plotting:main"
 
 
 [tool.setuptools]

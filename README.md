@@ -22,7 +22,7 @@ You can find them in the `assets` and `configs` folders to run the pipeline quic
 Just type in the terminal while having your venv active:
 
 ```console
-mapf-pipe --config-file configs/default_config.toml
+marl-path --config-file configs/default_config.toml
 ```
 
 If you want to use the pipeline on another map with your own configurations, you
@@ -70,5 +70,5 @@ output_folder = "output/my_run"
 | `--epochs` | Training epochs for the distance table CNN. | `100` |
 | `--lr` | Learning rate for training the distance table CNN. | `0.001` |
 | `--device` | Compute device for training (e.g., `cpu`, `cuda`). | `cpu` |
-| `--output-folder` | Directory to store metrics and results. | `output` |
+| `--output-dir` | Directory to store metrics and results. | `output` |
 | `--seed_training` | Random seed for the model training run. | `0` |

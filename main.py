@@ -1,4 +1,4 @@
-from MARL_MAPF_pipeline import main
+from marl_path import main
 
 
 if __name__ == "__main__":

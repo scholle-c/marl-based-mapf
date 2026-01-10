@@ -1,0 +1,46 @@
+exclude: ^assets/
+repos:
+  # ------------------------------------------------------------
+  # 1) Standard hygiene & safety hooks
+  # ------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+      - id: check-ast
+      - id: debug-statements
+
+  # ------------------------------------------------------------
+  # 2) Linter & code formatters
+  # ------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff
+      - id: ruff-format
+
+  # ------------------------------------------------------------
+  # 3) Type checker
+  # ------------------------------------------------------------
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.407
+    hooks:
+      - id: pyright
+
+
+  # ------------------------------------------------------------
+  # 4) Commit message rules (Conventional Commits)
+  # ------------------------------------------------------------
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.11.0
+    hooks:
+      - id: commitizen
+      - id: commitizen-branch
+        stages: [pre-push]

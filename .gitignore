@@ -65,3 +65,6 @@ data/
 output/
 configs/
 assets/
+
+# Git Hooks
+pyrightconfig.json

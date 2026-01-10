@@ -1,0 +1,16 @@
+# LaCAM settings
+map_file        = "./assets/tunnel.map"
+scen_file       = "./assets/tunnel.scen"
+num_agents      = 4
+verbose         = 1
+seed            = 1
+time_limit_ms   = 5000
+flg_star        = false
+training_mode   = "best"
+
+# RL training settings
+epochs          = 100
+lr              = 1e-3
+device          = "auto"
+output_dir      = "./output/default_output"
+seed_training   = 1

@@ -7,6 +7,7 @@ from .pipeline import run_pipeline
 def main():
     parser = argparse.ArgumentParser()
 
+    # ======== Arguments for PyLaCAM ========
     parser.add_argument(
         "-c",
         "--config-file",
@@ -48,6 +49,8 @@ def main():
 
     parser.add_argument("-t", "--time_limit_ms", type=int, default=1000)
 
+
+    # ======== Arguments for training the distance table predictor ========
     parser.add_argument(
         "--training_mode",
         type=str,
@@ -97,6 +100,13 @@ def main():
         type=int,
         default=0,
         help="random seed for training the distance table CNN model.",
+    )
+
+    parser.add_argument(
+        "--use_pretraining",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="whether to pretrain the distance table model on the map size as default values before training with LaCAM.",
     )
 
     args = parser.parse_args()

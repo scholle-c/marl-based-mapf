@@ -18,7 +18,7 @@ def train_on_lacam_solution(
     starts: Any,
     goals: Any,
     map: Any,
-    device_str: str | None = None,
+    device: torch.device | None = None,
 ) -> float:
     """
     RL fine-tuning based on a LaCAM solution.
@@ -34,9 +34,8 @@ def train_on_lacam_solution(
     """
 
     model.train()
-    if device_str is None or device_str == "auto":
-        device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(device_str)
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     optimizer.zero_grad()
 
     num_agents = len(starts)
@@ -128,7 +127,7 @@ def _get_agent_values_targets_helper(
         neigh_coords: List[Coord] = list(neighbors.keys())
         values_neigh: torch.Tensor = _get_via_coordinates(dist_table, neigh_coords)
         target_neigh: List[torch.Tensor] = []
-        dist_table_arr: np.ndarray = dist_table.detach().numpy()
+        dist_table_arr: np.ndarray = dist_table.detach().cpu().numpy()
 
         for neigh in neigh_coords:
             target_neigh.append(

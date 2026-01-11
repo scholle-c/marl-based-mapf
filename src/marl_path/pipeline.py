@@ -15,18 +15,20 @@ import torch
 import os
 import numpy as np
 from .constants import TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
+from loguru import logger
 
 SEED_MAX = 2**32 - 1
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
+    logger.info("starting MARL-path pipeline in mode: {}", args.training_mode)
     if args.training_mode == TRAIN_MODE_LACAM_ONLY:
         _run_lacam_only(args)
         return
 
     model, training_stats = _run_model_training(args)
 
-    print("Training completed.")
+    logger.info("training completed.")
 
     if args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -37,12 +39,12 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
 
 def _initialize_model(
-    path: str | None, apply_pretraining: bool = False, grid=None
+    path: str | None, device: torch.device, apply_pretraining: bool = False, grid=None
 ) -> DistanceTableCNN:
     if path is not None:
-        return load_model(path)
+        return load_model(path, device=device)
 
-    model = DistanceTableCNN()
+    model = DistanceTableCNN().to(device)
     if apply_pretraining:
         pretrain_optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         pretrain_on_default_value(model, grid, pretrain_optimizer, num_epochs=1000)
@@ -54,15 +56,21 @@ def _run_model_training(
 ) -> Tuple[DistanceTableCNN, TrainingStats]:
     grid = get_grid(args.map_file)
     starts, goals = get_scenario(args.scen_file, args.num_agents)
-    model: DistanceTableCNN | None = _initialize_model(args.model_file)
+    device: torch.device = _get_device(args.device)
+    model: DistanceTableCNN | None = _initialize_model(args.model_file, 
+                                                       device,
+                                                       apply_pretraining=args.use_pretraining, 
+                                                       grid=grid)
     training_stats: TrainingStats = TrainingStats()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found = False
     random_seed_gen = random.Random(args.seed)
 
+    logger.info("starting training loop with parameters: epochs={}, lr={}, device={}, seed={}", args.epochs, args.lr, device.type, args.seed)
+
     # Start training loop
     for epoch in range(args.epochs):
-        print(f"Epoch {epoch + 1}/{args.epochs}")
+        logger.info(f"\n====== Epoch {epoch + 1}/{args.epochs} ======")
         seed = random_seed_gen.randint(0, SEED_MAX)
 
         # solve MAPF
@@ -73,6 +81,7 @@ def _run_model_training(
             starts=starts,
             goals=goals,
             model=model,
+            device=device,
             seed=seed,
             time_limit_ms=args.time_limit_ms,
             flg_star=args.flg_star,
@@ -121,12 +130,15 @@ def _run_model_training(
                 soc_with_model = get_soc(solution)
                 if soc_without_model < soc_with_model:
                     solution = solution_no_model
+                    logger.opt(colors=True).info("Best solution comes from: <red>no model</red>")
+                else:
+                    logger.opt(colors=True).info("Best solution comes from: <green>with model</green>")
 
         soc = get_soc(solution)
 
         # train model
         mean_loss = train_on_lacam_solution(
-            model, optimizer, solution, starts, goals, grid, device_str=args.device
+            model, optimizer, solution, starts, goals, grid, device=device
         )
 
         training_stats.record_epoch(
@@ -137,7 +149,7 @@ def _run_model_training(
             dist_table_diff=dist_table_difference,
         )
 
-        print(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")
+        logger.info(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")
         solution_found = False
     return model, training_stats
 
@@ -167,3 +179,24 @@ def _run_lacam_only(args: argparse.Namespace) -> None:
     validate_mapf_solution(grid, starts, goals, solution)
     soc = get_soc(solution)
     print(f"LaCAM only SOC: {soc}")
+
+def _get_device(device_str: str) -> torch.device:
+    if device_str == "cpu":
+        return torch.device("cpu")
+    
+    has_cuda = torch.cuda.is_available()
+    
+    if device_str == "auto":
+        if has_cuda:
+            return torch.device("cuda")
+        else:
+            return torch.device("cpu")
+
+    if device_str.startswith("cuda"):
+        if torch.cuda.is_available():
+            return torch.device(device_str)
+        else:
+            print("CUDA is not available. Falling back to CPU.")
+            return torch.device("cpu")
+    else:
+        raise ValueError(f"Unknown device string: {device_str}")

@@ -15,6 +15,7 @@ class DistTable:
     grid: Grid
     goal: Coord
     model: Optional[DistanceTableCNN] = None
+    device: torch.device | None = None
     has_model_generated: bool = field(init=False, default=False)
     Q: deque = field(init=False)
     table: np.ndarray = field(init=False)  # distance matrix
@@ -44,7 +45,7 @@ class DistTable:
 
     def compute_table_model(self, target: Coord) -> None:
         self.input_tensor: torch.Tensor = build_input_tensor(
-            self.grid, self.goal, target
+            self.grid, self.goal, target, device=self.device
         )
         with torch.no_grad():
             output: torch.Tensor = self.model(self.input_tensor)  # type: ignore

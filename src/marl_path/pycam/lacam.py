@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from loguru import logger
 from typing import Optional
+import torch
 
 from .dist_table import DistTable
 from marl_path.shared.mapf_utils import (
@@ -65,6 +66,7 @@ class LaCAM:
         starts: Config,
         goals: Config,
         model: Optional[DistanceTableCNN] = None,
+        device: torch.device | None = None,
         time_limit_ms: int = 3000,
         deadline: Deadline | None = None,
         flg_star: bool = True,
@@ -77,6 +79,7 @@ class LaCAM:
         self.starts: Config = starts
         self.goals: Config = goals
         self.model: Optional[DistanceTableCNN] = model
+        self.device: torch.device | None = device
         self.deadline: Deadline = (
             deadline if deadline is not None else Deadline(time_limit_ms)
         )
@@ -91,7 +94,7 @@ class LaCAM:
 
         # set distance tables
         self.dist_tables = [
-            DistTable(self.grid, g, model=self.model) for g in self.goals
+            DistTable(self.grid, g, model=self.model, device=self.device) for g in self.goals
         ]
         self.pibt = PIBT(self.dist_tables)
 

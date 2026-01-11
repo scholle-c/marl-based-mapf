@@ -19,6 +19,7 @@ from loguru import logger
 SEED_MAX = 2**32 - 1
 
 
+# TODO: Der Seed scheint aktuell noch nicht zu funktionieren, ergebnisse sind nicht reproduzierbar --> Liegt ggf am pretraining.
 def run_pipeline(args: argparse.Namespace) -> None:
     logger.info("starting MARL-path pipeline in mode: {}", args.training_mode)
     if args.training_mode == TRAIN_MODE_LACAM_ONLY:
@@ -72,7 +73,8 @@ def _run_model_training(
         args.model_file, device, apply_pretraining=args.use_pretraining, grid=grid
     )
     training_stats: TrainingStats = TrainingStats(
-        dist_table_record_mode=args.dist_table_record_mode
+        dist_table_record_mode=args.dist_table_record_mode,
+        training_mode=args.training_mode,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found = False

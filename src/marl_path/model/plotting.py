@@ -9,7 +9,7 @@ from marl_path.model.stats import TrainingStats
 import matplotlib
 
 matplotlib.use(
-    "Qt5Agg"
+    "TkAgg"  # Alternative "QTAgg"
 )  # Remove if your running on windows or MacOS, only for linux systems with no display server
 import matplotlib.pyplot as plt
 
@@ -181,9 +181,9 @@ def _plot_training_stats(
     num_epochs: int,
     socs: List[int],
     losses: List[float],
-    socs_model: List[int] | None = None,
-    socs_no_model: List[int] | None = None,
-    dist_table_differences: List[float] | None = None,
+    socs_model: List | None = None,
+    socs_no_model: List | None = None,
+    dist_table_differences: List | None = None,
     show: bool = True,
 ) -> None:
     """

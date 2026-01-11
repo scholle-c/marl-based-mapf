@@ -6,27 +6,29 @@ from typing import List
 import json
 import numpy as np
 import os
+from marl_path.constants import TRAIN_MODE_BEST
 
 
 @dataclass
 class TrainingStats:
     """Class for storing training statistics."""
 
+    training_mode: str
     epochs: int = 0
     training_loss: List[float] = field(default_factory=list)
     validation_loss: List[float] = field(default_factory=list)
     socs: List[int] = field(default_factory=list)
-    socs_model: List[int] = field(default_factory=list)
-    socs_no_model: List[int] = field(default_factory=list)
-    dist_table_differences: List[float] = field(default_factory=list)
+    socs_model: List[int | None] = field(default_factory=list)
+    socs_no_model: List[int | None] = field(default_factory=list)
+    dist_table_differences: List[float | None] = field(default_factory=list)
     dist_table_record_mode: int = 0
     dist_tables_lacam: List = field(default_factory=list)
     dist_tables_model: List = field(default_factory=list)
 
     @property
     def used_best_mode(self) -> bool:
-        """Check if best mode was used (i.e., if socs_no_model has data)."""
-        return len(self.socs_no_model) > 0
+        """Check if best mode was used"""
+        return self.training_mode == TRAIN_MODE_BEST
 
     @property
     def has_dist_table_differences(self) -> bool:
@@ -41,7 +43,9 @@ class TrainingStats:
         return sum(
             1
             for soc_model, soc_no_model in zip(self.socs_model, self.socs_no_model)
-            if soc_model < soc_no_model
+            if soc_model is not None
+            and soc_no_model is not None
+            and soc_model < soc_no_model
         )
 
     def record_epoch(
@@ -61,9 +65,8 @@ class TrainingStats:
 
         if val_loss is not None:
             self.validation_loss.append(val_loss)
-        if soc_model is not None:
+        if self.used_best_mode:
             self.socs_model.append(soc_model)
-        if soc_no_model is not None:
             self.socs_no_model.append(soc_no_model)
         if dist_tables_model is not None:
             self._record_dist_table_stats(dist_tables_model, dist_tables_lacam)
@@ -86,7 +89,7 @@ class TrainingStats:
             self.dist_table_differences.append(dist_table_difference)
 
         if self.dist_table_record_mode == 1:
-            if self.epochs % 10 == 0:
+            if (self.epochs - 1) % 10 == 0:
                 self.dist_tables_model.append(dist_tables_model)
                 if dist_tables_lacam is not None:
                     self.dist_tables_lacam.append(dist_tables_lacam)
@@ -95,6 +98,8 @@ class TrainingStats:
                 return
             if (
                 self.dist_tables_lacam is not None
+                and self.socs_model[-1] is not None
+                and self.socs_no_model[-1] is not None
                 and self.socs_model[-1] < self.socs_no_model[-1]
             ):
                 self.dist_tables_model.append(dist_tables_model)
@@ -144,6 +149,7 @@ class TrainingStats:
         with open(filepath, "r") as f:
             data = json.load(f)
         return cls(
+            training_mode=data["training_mode"],
             epochs=data["epochs"],
             training_loss=data["training_loss"],
             validation_loss=data["validation_loss"],
@@ -153,9 +159,10 @@ class TrainingStats:
             dist_table_differences=data["dist_table_differences"],
         )
 
-    def _to_dict(self) -> dict[str, List | int]:
+    def _to_dict(self) -> dict[str, List | int | str]:
         """Convert statistics to a dictionary."""
         return {
+            "training_mode": self.training_mode,
             "epochs": self.epochs,
             "training_loss": self.training_loss,
             "validation_loss": self.validation_loss,

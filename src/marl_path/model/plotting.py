@@ -5,7 +5,12 @@ Methods for visualizing the result of the reinforcement-learning training
 import argparse
 import os
 from typing import Iterable, List, Tuple
-from .stats import TrainingStats
+from marl_path.model.stats import TrainingStats
+import matplotlib
+
+matplotlib.use(
+    "Qt5Agg"
+)  # Remove if your running on windows or MacOS, only for linux systems with no display server
 import matplotlib.pyplot as plt
 
 SOC_PLOTTING_PARAMS = {

@@ -49,7 +49,6 @@ def main():
 
     parser.add_argument("-t", "--time_limit_ms", type=int, default=1000)
 
-
     # ======== Arguments for training the distance table predictor ========
     parser.add_argument(
         "--training_mode",

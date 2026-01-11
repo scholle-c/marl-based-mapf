@@ -57,16 +57,21 @@ def _run_model_training(
     grid = get_grid(args.map_file)
     starts, goals = get_scenario(args.scen_file, args.num_agents)
     device: torch.device = _get_device(args.device)
-    model: DistanceTableCNN | None = _initialize_model(args.model_file, 
-                                                       device,
-                                                       apply_pretraining=args.use_pretraining, 
-                                                       grid=grid)
+    model: DistanceTableCNN | None = _initialize_model(
+        args.model_file, device, apply_pretraining=args.use_pretraining, grid=grid
+    )
     training_stats: TrainingStats = TrainingStats()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found = False
     random_seed_gen = random.Random(args.seed)
 
-    logger.info("starting training loop with parameters: epochs={}, lr={}, device={}, seed={}", args.epochs, args.lr, device.type, args.seed)
+    logger.info(
+        "starting training loop with parameters: epochs={}, lr={}, device={}, seed={}",
+        args.epochs,
+        args.lr,
+        device.type,
+        args.seed,
+    )
 
     # Start training loop
     for epoch in range(args.epochs):
@@ -130,9 +135,13 @@ def _run_model_training(
                 soc_with_model = get_soc(solution)
                 if soc_without_model < soc_with_model:
                     solution = solution_no_model
-                    logger.opt(colors=True).info("Best solution comes from: <red>no model</red>")
+                    logger.opt(colors=True).info(
+                        "Best solution comes from: <red>no model</red>"
+                    )
                 else:
-                    logger.opt(colors=True).info("Best solution comes from: <green>with model</green>")
+                    logger.opt(colors=True).info(
+                        "Best solution comes from: <green>with model</green>"
+                    )
 
         soc = get_soc(solution)
 
@@ -180,12 +189,13 @@ def _run_lacam_only(args: argparse.Namespace) -> None:
     soc = get_soc(solution)
     print(f"LaCAM only SOC: {soc}")
 
+
 def _get_device(device_str: str) -> torch.device:
     if device_str == "cpu":
         return torch.device("cpu")
-    
+
     has_cuda = torch.cuda.is_available()
-    
+
     if device_str == "auto":
         if has_cuda:
             return torch.device("cuda")

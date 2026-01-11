@@ -115,6 +115,13 @@ def main():
         help="whether to include neighboring cells in the loss computation when training the distance table model.",
     )
 
+    parser.add_argument(
+        "--dist-table-record-mode",
+        type=int,
+        default=0,
+        help="mode for recording distance tables during training. 0: no recording, 1: record every 10 epochs, 2: record, when model outperforms LaCAM, 3: record all epochs. WARINING: storage intensive with large maps and number of agents!",
+    )
+
     args = parser.parse_args()
     if args.config_file is not None:
         config = load_config(args.config_file)

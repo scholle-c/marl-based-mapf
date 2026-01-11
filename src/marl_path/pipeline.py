@@ -13,7 +13,6 @@ from .pycam import LaCAM
 from typing import Tuple
 import torch
 import os
-import numpy as np
 from .constants import TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
 from loguru import logger
 
@@ -29,13 +28,21 @@ def run_pipeline(args: argparse.Namespace) -> None:
     model, training_stats = _run_model_training(args)
 
     logger.info("training completed.")
+    if args.training_mode == TRAIN_MODE_BEST:
+        logger.info(
+            "Successful model epochs: {} out of {} epochs ({:.2f}%)",
+            training_stats.successful_model_epochs,
+            training_stats.epochs,
+            (training_stats.successful_model_epochs / training_stats.epochs * 100)
+            if training_stats.epochs > 0
+            else 0,
+        )
 
     if args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
         model_path = os.path.join(args.output_dir, "trained_model.pt")
         torch.save(model.state_dict(), model_path)
-        json_path = os.path.join(args.output_dir, "training_stats.json")
-        training_stats.save_as_json(json_path)
+        training_stats.save(args.output_dir)
 
 
 def _initialize_model(
@@ -64,7 +71,9 @@ def _run_model_training(
     model: DistanceTableCNN | None = _initialize_model(
         args.model_file, device, apply_pretraining=args.use_pretraining, grid=grid
     )
-    training_stats: TrainingStats = TrainingStats()
+    training_stats: TrainingStats = TrainingStats(
+        dist_table_record_mode=args.dist_table_record_mode
+    )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found = False
     random_seed_gen = random.Random(args.seed)
@@ -100,11 +109,10 @@ def _run_model_training(
             solution_found = True
             validate_mapf_solution(grid, starts, goals, solution)
 
-        dist_tables_model = planner.dist_tables
-
         soc_with_model = None
         soc_without_model = None
-        dist_table_difference = None
+        dist_tables_model = [dt.table for dt in planner.dist_tables]
+        dist_tables_lacam = None
 
         if args.training_mode == TRAIN_MODE_BEST:
             # Solve again without model
@@ -120,17 +128,7 @@ def _run_model_training(
             )
             validate_mapf_solution(grid, starts, goals, solution_no_model)
             soc_without_model = get_soc(solution_no_model)
-
-            dist_table_difference = float(
-                np.mean(
-                    [
-                        np.abs(dt_model.table - dt_no_model.table).mean().item()
-                        for dt_model, dt_no_model in zip(
-                            dist_tables_model, planner.dist_tables
-                        )
-                    ]
-                )
-            )
+            dist_tables_lacam = [dt.table for dt in planner.dist_tables]
 
             if not solution_found:
                 solution = solution_no_model
@@ -166,7 +164,8 @@ def _run_model_training(
             soc,
             soc_model=soc_with_model,
             soc_no_model=soc_without_model,
-            dist_table_diff=dist_table_difference,
+            dist_tables_lacam=dist_tables_lacam,
+            dist_tables_model=dist_tables_model,
         )
 
         logger.info(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")

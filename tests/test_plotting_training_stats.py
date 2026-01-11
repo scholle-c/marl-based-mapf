@@ -12,12 +12,11 @@ def test_finding_json():
         val_loss=0.6,
         soc_model=12,
         soc_no_model=11,
-        dist_table_diff=0.1,
     )
 
     stats_filename = "temp_plot_training_stats.json"
     stats_filepath = os.path.join(DATA_FOLDER, stats_filename)
-    stats.save_as_json(stats_filepath)
+    stats._save_as_json(stats_filepath)
 
     found_files = plotting._find_json_files_in_folder(DATA_FOLDER)
     assert stats_filepath in found_files
@@ -31,12 +30,11 @@ def test_loading_training_stats():
         val_loss=0.6,
         soc_model=12,
         soc_no_model=11,
-        dist_table_diff=0.1,
     )
 
     stats_filename = "temp_plot_training_stats.json"
     stats_filepath = os.path.join(DATA_FOLDER, stats_filename)
-    stats.save_as_json(stats_filepath)
+    stats._save_as_json(stats_filepath)
 
     training_stats = plotting._load_stats([DATA_FOLDER])
     assert len(training_stats) > 0

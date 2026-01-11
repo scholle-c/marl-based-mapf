@@ -46,8 +46,12 @@ def _initialize_model(
 
     model = DistanceTableCNN().to(device)
     if apply_pretraining:
+        logger.info("applying pretraining on default values...")
         pretrain_optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-        pretrain_on_default_value(model, grid, pretrain_optimizer, num_epochs=1000)
+        pretrain_on_default_value(
+            model, grid, pretrain_optimizer, num_epochs=1000, device=device
+        )
+        logger.info("pretraining completed.")
     return model
 
 
@@ -147,7 +151,14 @@ def _run_model_training(
 
         # train model
         mean_loss = train_on_lacam_solution(
-            model, optimizer, solution, starts, goals, grid, device=device
+            model,
+            optimizer,
+            solution,
+            starts,
+            goals,
+            grid,
+            device=device,
+            use_neighbors=args.use_neighbors,
         )
 
         training_stats.record_epoch(

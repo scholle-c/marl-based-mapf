@@ -40,18 +40,18 @@ def main():
         default=1,
     )
     parser.add_argument(
-        "--flg_star",
+        "--flg-star",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="choose LaCAM* (default) or vanilla LaCAM",
     )
     parser.add_argument("-s", "--seed", type=int, default=0)
 
-    parser.add_argument("-t", "--time_limit_ms", type=int, default=1000)
+    parser.add_argument("-t", "--time-limit-ms", type=int, default=1000)
 
     # ======== Arguments for training the distance table predictor ========
     parser.add_argument(
-        "--training_mode",
+        "--training-mode",
         type=str,
         default="model",
         help="Choose between: 'model' (train with model-based solutions), "
@@ -95,17 +95,24 @@ def main():
     )
 
     parser.add_argument(
-        "--seed_training",
+        "--seed-training",
         type=int,
         default=0,
         help="random seed for training the distance table CNN model.",
     )
 
     parser.add_argument(
-        "--use_pretraining",
+        "--use-pretraining",
         action=argparse.BooleanOptionalAction,
         default=False,
         help="whether to pretrain the distance table model on the map size as default values before training with LaCAM.",
+    )
+
+    parser.add_argument(
+        "--use-neighbors",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="whether to include neighboring cells in the loss computation when training the distance table model.",
     )
 
     args = parser.parse_args()

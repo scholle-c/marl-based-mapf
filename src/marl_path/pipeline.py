@@ -15,11 +15,11 @@ import torch
 import os
 from .constants import TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
 from loguru import logger
+import numpy as np
 
 SEED_MAX = 2**32 - 1
 
 
-# TODO: Der Seed scheint aktuell noch nicht zu funktionieren, ergebnisse sind nicht reproduzierbar --> Liegt ggf am pretraining.
 def run_pipeline(args: argparse.Namespace) -> None:
     logger.info("starting MARL-path pipeline in mode: {}", args.training_mode)
     if args.training_mode == TRAIN_MODE_LACAM_ONLY:
@@ -47,10 +47,20 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
 
 def _initialize_model(
-    path: str | None, device: torch.device, apply_pretraining: bool = False, grid=None
+    path: str | None,
+    device: torch.device,
+    apply_pretraining: bool = False,
+    grid=None,
+    seed: int | None = None,
 ) -> DistanceTableCNN:
     if path is not None:
         return load_model(path, device=device)
+
+    if seed is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
 
     model = DistanceTableCNN().to(device)
     if apply_pretraining:
@@ -70,7 +80,11 @@ def _run_model_training(
     starts, goals = get_scenario(args.scen_file, args.num_agents)
     device: torch.device = _get_device(args.device)
     model: DistanceTableCNN | None = _initialize_model(
-        args.model_file, device, apply_pretraining=args.use_pretraining, grid=grid
+        args.model_file,
+        device,
+        apply_pretraining=args.use_pretraining,
+        grid=grid,
+        seed=getattr(args, "seed_training", None),
     )
     training_stats: TrainingStats = TrainingStats(
         dist_table_record_mode=args.dist_table_record_mode,

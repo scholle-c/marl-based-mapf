@@ -64,11 +64,23 @@ output_folder = "output/my_run"
 | `-N, --num-agents` | Number of agents to read from the scenario. | `4` |
 | `-v, --verbose` | Verbosity level for logging. | `1` |
 | `-s, --seed` | Random seed for the LaCAM planner. | `0` |
-| `-t, --time_limit_ms` | Time limit (milliseconds) for the planner. | `1000` |
-| `--training_mode` | Choose between: 'model' (train with model-based solutions), 'lacam_only' (no training, just one LaCAM execution), and 'best' (take best solution from either LaCAM or model per epoch). | `model` |
+| `-t, --time-limit-ms` | Time limit (milliseconds) for the planner. | `1000` |
+| `--training-mode` | Choose between: 'model' (train with model-based solutions), 'lacam_only' (no training, just one LaCAM execution), and 'best' (take best solution from either LaCAM or model per epoch). | `model` |
 | `--model-file` | Pretrained distance table CNN checkpoint. If not provided, a new CNN model is created that is initially trained to always predict the max-distance (=map-size) | `None` |
 | `--epochs` | Training epochs for the distance table CNN. | `100` |
 | `--lr` | Learning rate for training the distance table CNN. | `0.001` |
 | `--device` | Compute device for training (e.g., `cpu`, `cuda`). | `cpu` |
-| `--output-dir` | Directory to store metrics and results. | `output` |
-| `--seed_training` | Random seed for the model training run. | `0` |
+| `--output-dir` | Directory to store metrics and results. | `src/marl_path/output` |
+| `--seed-training` | Random seed for the model training run. | `0` |
+| `--flg-star, --no-flg-star` | Choose LaCAM* (default) or vanilla LaCAM. | `True` |
+| `--use-pretraining, --no-use-pretraining` | Pretrain the distance table model on map-size defaults before LaCAM training. | `False` |
+| `--use-neighbors, --no-use-neighbors` | Include neighboring cells in the loss computation. | `False` |
+| `--dist-table-record-mode` | Record distance tables during training: 0 none, 1 every 10 epochs, 2 only when model beats LaCAM, 3 every epoch. | `0` |
+
+## Visualizer
+
+The training results can be all seen in the visualizer. You can start it via:
+```console
+marl-vis
+```
+This should start a webserver where you can explore the result of your training runs.

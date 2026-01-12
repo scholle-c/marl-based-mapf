@@ -80,7 +80,9 @@ output_folder = "output/my_run"
 ## Visualizer
 
 The training results can be all seen in the visualizer. You can start it via:
+
 ```console
 marl-vis
 ```
+
 This should start a webserver where you can explore the result of your training runs.

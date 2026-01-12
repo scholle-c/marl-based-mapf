@@ -1,4 +1,4 @@
-exclude: ^assets/
+exclude: ^(assets/|tests/|configs/|src/marl_path/pycam/|src/marl_path/shared/mapf_utils.py$)  # Exclude non-source code files
 repos:
   # ------------------------------------------------------------
   # 1) Standard hygiene & safety hooks

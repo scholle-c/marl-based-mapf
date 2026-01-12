@@ -5,7 +5,12 @@ Methods for visualizing the result of the reinforcement-learning training
 import argparse
 import os
 from typing import Iterable, List, Tuple
-from .stats import TrainingStats
+from marl_path.model.stats import TrainingStats
+import matplotlib
+
+matplotlib.use(
+    "TkAgg"  # Alternative "QTAgg"
+)  # Remove if your running on windows or MacOS, only for linux systems with no display server
 import matplotlib.pyplot as plt
 
 SOC_PLOTTING_PARAMS = {
@@ -176,9 +181,9 @@ def _plot_training_stats(
     num_epochs: int,
     socs: List[int],
     losses: List[float],
-    socs_model: List[int] | None = None,
-    socs_no_model: List[int] | None = None,
-    dist_table_differences: List[float] | None = None,
+    socs_model: List | None = None,
+    socs_no_model: List | None = None,
+    dist_table_differences: List | None = None,
     show: bool = True,
 ) -> None:
     """

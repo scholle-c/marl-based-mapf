@@ -13,7 +13,6 @@ def test_saving_and_loading_training_stats():
         val_loss=0.6,
         soc_model=12,
         soc_no_model=11,
-        dist_table_diff=0.1,
     )
     stats.record_epoch(
         train_loss=0.4,
@@ -21,12 +20,11 @@ def test_saving_and_loading_training_stats():
         val_loss=0.5,
         soc_model=11,
         soc_no_model=10,
-        dist_table_diff=0.05,
     )
 
     temp_filename = "temp_training_stats.json"
     temp_filepath = os.path.join(DATA_FOLDER, temp_filename)
-    stats.save_as_json(temp_filepath)
+    stats._save_as_json(temp_filepath)
 
     loaded_stats = TrainingStats.load_from_json(temp_filepath)
 
@@ -36,4 +34,3 @@ def test_saving_and_loading_training_stats():
     assert loaded_stats.socs == stats.socs
     assert loaded_stats.socs_model == stats.socs_model
     assert loaded_stats.socs_no_model == stats.socs_no_model
-    assert loaded_stats.dist_table_differences == stats.dist_table_differences

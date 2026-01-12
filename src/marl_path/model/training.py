@@ -18,7 +18,8 @@ def train_on_lacam_solution(
     starts: Any,
     goals: Any,
     map: Any,
-    device_str: str | None = None,
+    device: torch.device | None = None,
+    use_neighbors: bool = False,
 ) -> float:
     """
     RL fine-tuning based on a LaCAM solution.
@@ -31,12 +32,12 @@ def train_on_lacam_solution(
         starts: Start configuration for each agent.
         goals: Goal configuration for each agent.
         map: Grid map of the environment.
+        use_neighbors: Whether to include neighboring cells in the loss computation.
     """
 
     model.train()
-    if device_str is None or device_str == "auto":
-        device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(device_str)
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     optimizer.zero_grad()
 
     num_agents = len(starts)
@@ -47,7 +48,13 @@ def train_on_lacam_solution(
     for agent_idx in range(num_agents):
         path = [solution[t][agent_idx] for t in range(len(solution))]
         agent_values, agent_targets = _get_agent_values_targets(
-            starts[agent_idx], goals[agent_idx], path, map, model, device
+            starts[agent_idx],
+            goals[agent_idx],
+            path,
+            map,
+            model,
+            device,
+            use_neighbors=use_neighbors,
         )
 
         values.extend(agent_values)
@@ -128,7 +135,7 @@ def _get_agent_values_targets_helper(
         neigh_coords: List[Coord] = list(neighbors.keys())
         values_neigh: torch.Tensor = _get_via_coordinates(dist_table, neigh_coords)
         target_neigh: List[torch.Tensor] = []
-        dist_table_arr: np.ndarray = dist_table.detach().numpy()
+        dist_table_arr: np.ndarray = dist_table.detach().cpu().numpy()
 
         for neigh in neigh_coords:
             target_neigh.append(
@@ -320,6 +327,7 @@ def pretrain_on_default_value(
     optimizer: Any,
     default_value: int | None = None,
     num_epochs: int = 10,
+    device: torch.device | None = None,
 ) -> None:
     """
     Trains the distance-table model, to predict a default value
@@ -332,7 +340,8 @@ def pretrain_on_default_value(
         num_epochs (int, optional): How many epochs should be used for training. Defaults to 10.
     """
 
-    device = next(model.parameters()).device
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     fill_value: int = grid.size if default_value is None else default_value
     target_tensor: torch.Tensor = torch.full(
         size=grid.shape, fill_value=fill_value, dtype=torch.float32, device=device
@@ -341,7 +350,7 @@ def pretrain_on_default_value(
     model.train()
     for _ in range(num_epochs):
         optimizer.zero_grad()
-        random_input: torch.Tensor = build_random_input_tensor(grid)
+        random_input: torch.Tensor = build_random_input_tensor(grid, device=device)
         value_tensor = model(random_input).squeeze(0).squeeze(0)
         mean_loss = torch.nn.functional.mse_loss(value_tensor, target_tensor)
         mean_loss.backward()

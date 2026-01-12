@@ -11,12 +11,12 @@ import numpy as np
 from typing import Any
 
 
-def load_model(model_path: str, device: str | None = None) -> Any:
+def load_model(model_path: str, device: torch.device | None = None) -> Any:
     """
     Load a trained model for inference.
     """
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DistanceTableCNN().to(device)
     state_dict = torch.load(model_path, map_location=device)
     model.load_state_dict(state_dict)

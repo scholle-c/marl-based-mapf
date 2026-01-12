@@ -155,8 +155,10 @@ def test_pretrain_model_on_default_value():
     if SKIP_PRETRAIN_TEST:
         pytest.skip("Skipping pretrain model test to save time.")
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     # arrange
-    model = DistanceTableCNN()
+    model = DistanceTableCNN().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     grid_array = np.array(
         [
@@ -171,13 +173,13 @@ def test_pretrain_model_on_default_value():
 
     # act
     pretrain_on_default_value(
-        model, grid_array, optimizer, default_value=default_value, num_epochs=1000
+        model, grid_array, optimizer, default_value=default_value, num_epochs=1000, device=device
     )
 
     # assert
     model.eval()
     with torch.no_grad():
-        random_input = build_random_input_tensor(grid_array)
+        random_input = build_random_input_tensor(grid_array, device=device)
         output = model(random_input).squeeze().cpu().numpy()
         mean_output_value = np.mean(output)
         assert np.isclose(mean_output_value, default_value, atol=1.0), (

@@ -8,7 +8,10 @@ from marl_path.shared import Grid
 
 
 def build_input_tensor(
-    grid: Grid, goal: tuple[int, int], start: tuple[int, int]
+    grid: Grid,
+    goal: tuple[int, int],
+    start: tuple[int, int],
+    device: torch.device | None = None,
 ) -> torch.Tensor:
     if grid.ndim != 2:
         raise ValueError("Grid must be a 2D array.")
@@ -24,10 +27,15 @@ def build_input_tensor(
     start_channel[start] = 1.0
 
     stacked = np.stack((map_channel, goal_channel, start_channel), axis=0)
-    return torch.from_numpy(stacked).unsqueeze(0)
+    tensor = torch.from_numpy(stacked).unsqueeze(0)
+    if device is not None:
+        tensor = tensor.to(device)
+    return tensor
 
 
-def build_random_input_tensor(grid: Grid) -> torch.Tensor:
+def build_random_input_tensor(
+    grid: Grid, device: torch.device | None = None
+) -> torch.Tensor:
     map_channel = np.random.random(grid.shape)
     goal_channel = np.random.random(grid.shape)
     start_channel = np.random.random(grid.shape)
@@ -35,4 +43,7 @@ def build_random_input_tensor(grid: Grid) -> torch.Tensor:
     stacked = np.stack(
         (map_channel, goal_channel, start_channel), axis=0, dtype=np.float32
     )
-    return torch.from_numpy(stacked).unsqueeze(0)
+    tensor = torch.from_numpy(stacked).unsqueeze(0)
+    if device is not None:
+        tensor = tensor.to(device)
+    return tensor

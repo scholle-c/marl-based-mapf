@@ -16,6 +16,7 @@ import os
 from .constants import TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
 from loguru import logger
 import numpy as np
+import json
 
 SEED_MAX = 2**32 - 1
 
@@ -41,9 +42,20 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     if args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
+        # Model saving
         model_path = os.path.join(args.output_dir, "trained_model.pt")
         torch.save(model.state_dict(), model_path)
+        # Training stats saving
         training_stats.save(args.output_dir)
+        # Arguments saving
+        args_path = os.path.join(args.output_dir, "used_config.json")
+        data = {
+            k: (str(v) if hasattr(v, "__fspath__") else v)
+            for k, v in vars(args).items()
+        }
+        with open(args_path, "w") as f:
+            json.dump(data, f, indent=4)
+        logger.info("Saved trained model and training stats to {}", args.output_dir)
 
 
 def _initialize_model(
@@ -89,6 +101,8 @@ def _run_model_training(
     training_stats: TrainingStats = TrainingStats(
         dist_table_record_mode=args.dist_table_record_mode,
         training_mode=args.training_mode,
+        used_device=device.type,
+        used_seed=getattr(args, "seed_training", None),
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found = False

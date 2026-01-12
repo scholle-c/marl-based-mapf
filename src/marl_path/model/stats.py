@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Any
 import json
 import numpy as np
 import os
@@ -24,6 +24,8 @@ class TrainingStats:
     dist_table_record_mode: int = 0
     dist_tables_lacam: List = field(default_factory=list)
     dist_tables_model: List = field(default_factory=list)
+    used_device: str | None = None
+    used_seed: int | None = None
 
     @property
     def used_best_mode(self) -> bool:
@@ -159,10 +161,12 @@ class TrainingStats:
             dist_table_differences=data["dist_table_differences"],
         )
 
-    def _to_dict(self) -> dict[str, List | int | str]:
+    def _to_dict(self) -> dict[str, Any]:
         """Convert statistics to a dictionary."""
         return {
             "training_mode": self.training_mode,
+            "used_device": self.used_device,
+            "used_seed": self.used_seed,
             "epochs": self.epochs,
             "training_loss": self.training_loss,
             "validation_loss": self.validation_loss,

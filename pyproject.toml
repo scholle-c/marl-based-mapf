@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "marl-path"
-version = "0.2.0"
+version = "0.2.2"
 description = "Research project, that tries to improve the LaCAM algorithm by using multi agent reinforcement learning"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,7 +23,12 @@ dependencies = [
 [project.optional-dependencies]
 dev =  [
     "pytest",
-    "pre-commit"
+    "pre-commit",
+    "commitizen"
+]
+webserver = [
+    "plotly",
+    "streamlit"
 ]
 
 
@@ -33,7 +38,7 @@ Repository = "https://github.com/scholle-c/marl-based-mapf"
 
 [project.scripts]
 marl-path = "marl_path.cli:main"
-marl-path-plot = "marl_path.model.plotting:main"
+marl-vis = "marl_path.visualization.cli:main"
 
 
 [tool.setuptools]

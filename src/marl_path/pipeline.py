@@ -13,7 +13,7 @@ from .pycam import LaCAM
 from typing import Tuple
 import torch
 import os
-from .constants import TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
+import marl_path.constants as consts
 from loguru import logger
 import numpy as np
 import json
@@ -23,14 +23,14 @@ SEED_MAX = 2**32 - 1
 
 def run_pipeline(args: argparse.Namespace) -> None:
     logger.info("starting MARL-path pipeline in mode: {}", args.training_mode)
-    if args.training_mode == TRAIN_MODE_LACAM_ONLY:
+    if args.training_mode == consts.TRAIN_MODE_LACAM_ONLY:
         _run_lacam_only(args)
         return
 
     model, training_stats = _run_model_training(args)
 
     logger.info("training completed.")
-    if args.training_mode == TRAIN_MODE_BEST:
+    if args.training_mode == consts.TRAIN_MODE_BEST:
         logger.info(
             "Successful model epochs: {} out of {} epochs ({:.2f}%)",
             training_stats.successful_model_epochs,
@@ -43,12 +43,14 @@ def run_pipeline(args: argparse.Namespace) -> None:
     if args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
         # Model saving
-        model_path = os.path.join(args.output_dir, "trained_model.pt")
+        model_path = os.path.join(
+            args.output_dir, consts.DEFAULT_FILENAME_TRAINED_MODEL
+        )
         torch.save(model.state_dict(), model_path)
         # Training stats saving
         training_stats.save(args.output_dir)
         # Arguments saving
-        args_path = os.path.join(args.output_dir, "used_config.json")
+        args_path = os.path.join(args.output_dir, consts.DEFAULT_FILENAME_USED_CONFIG)
         data = {
             k: (str(v) if hasattr(v, "__fspath__") else v)
             for k, v in vars(args).items()
@@ -144,7 +146,7 @@ def _run_model_training(
         dist_tables_model = [dt.table for dt in planner.dist_tables]
         dist_tables_lacam = None
 
-        if args.training_mode == TRAIN_MODE_BEST:
+        if args.training_mode == consts.TRAIN_MODE_BEST:
             # Solve again without model
             solution_no_model = planner.solve(
                 grid=grid,

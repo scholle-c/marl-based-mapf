@@ -6,7 +6,7 @@ from typing import List, Any
 import json
 import numpy as np
 import os
-from marl_path.constants import TRAIN_MODE_BEST
+import marl_path.constants as consts
 
 
 @dataclass
@@ -30,7 +30,7 @@ class TrainingStats:
     @property
     def used_best_mode(self) -> bool:
         """Check if best mode was used"""
-        return self.training_mode == TRAIN_MODE_BEST
+        return self.training_mode == consts.TRAIN_MODE_BEST
 
     @property
     def has_dist_table_differences(self) -> bool:
@@ -113,7 +113,9 @@ class TrainingStats:
 
     def save(self, output_folder: str) -> None:
         """Save statistics and distance tables to JSON files."""
-        filepath_stats = os.path.join(output_folder, "training_stats.json")
+        filepath_stats = os.path.join(
+            output_folder, consts.DEFAULT_FILENAME_TRAINING_STATS
+        )
         self._save_as_json(filepath_stats)
         if self.dist_table_record_mode != 0:
             self._save_dist_tables(output_folder)
@@ -132,12 +134,16 @@ class TrainingStats:
 
         if self.dist_tables_lacam:
             dist_tables_lacam_array = concat_dist_tables(self.dist_tables_lacam)
-            filepath_lacam = os.path.join(output_folder, "dist_tables_lacam.csv")
+            filepath_lacam = os.path.join(
+                output_folder, consts.DEFAULT_FILENAME_DIST_TABLE_LACAM
+            )
             np.savetxt(filepath_lacam, dist_tables_lacam_array, delimiter=",", fmt="%d")
 
         if self.dist_tables_model:
             dist_tables_model_array = concat_dist_tables(self.dist_tables_model)
-            filepath_model = os.path.join(output_folder, "dist_tables_model.csv")
+            filepath_model = os.path.join(
+                output_folder, consts.DEFAULT_FILENAME_DIST_TABLE_MODEL
+            )
             np.savetxt(filepath_model, dist_tables_model_array, delimiter=",", fmt="%d")
 
     def _save_as_json(self, filepath: str) -> None:

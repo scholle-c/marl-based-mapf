@@ -7,6 +7,7 @@ import os
 from typing import Iterable, List, Tuple
 from marl_path.model.stats import TrainingStats
 import matplotlib
+import marl_path.constants as consts
 
 matplotlib.use(
     "TkAgg"  # Alternative "QTAgg"
@@ -45,21 +46,7 @@ DIST_TABLE_DIFF_PLOTTING_PARAMS = {
 }
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Plot training statistics for distance table CNN model."
-    )
-    parser.add_argument(
-        "--stats-file",
-        type=str,
-        nargs="+",
-        required=True,
-        help=(
-            "Path(s) to JSON stats files or folders containing training_stats.json. "
-            "Provide multiple to visualize distribution."
-        ),
-    )
-    args = parser.parse_args()
+def run_plotting(args: argparse.Namespace) -> None:
     training_stats: List[TrainingStats] = _load_stats(args.stats_file)
     if len(training_stats) == 1:
         plot_training_stats(training_stats[0])
@@ -75,7 +62,9 @@ def _load_stats(paths: List[str]) -> List[TrainingStats]:
     for path in paths:
         target_path = path
         if os.path.isdir(target_path):
-            json_files = _find_json_files_in_folder(target_path)
+            json_files = _find_json_files_in_folder(
+                target_path, consts.DEFAULT_FILENAME_TRAINING_STATS
+            )
             training_stats.extend(_load_stats(json_files))
         elif not os.path.isfile(target_path):
             raise FileNotFoundError(f"Could not find stats file at {target_path}")
@@ -85,22 +74,27 @@ def _load_stats(paths: List[str]) -> List[TrainingStats]:
     return training_stats
 
 
-def _find_json_files_in_folder(folder_path: str) -> List[str]:
+def _find_json_files_in_folder(
+    folder_path: str, filename: str | None = None
+) -> List[str]:
     """
     _find_json_files_in_folder Looks for json files in a given folder and returns
     their filepath as a list.
 
     Args:
         folder_path (str): Path to the folder
-
+        filename (str | None): If given, only json files with this name are returned.
     Returns:
         List[str]: A list of found json filepaths. Is empty if no json file was found.
     """
     json_files = []
     for root, _, files in os.walk(folder_path):
         for file in files:
-            if file.endswith(".json"):
-                json_files.append(os.path.join(root, file))
+            if not file.endswith(".json"):
+                continue
+            if filename is not None and file != filename:
+                continue
+            json_files.append(os.path.join(root, file))
     return json_files
 
 
@@ -399,7 +393,3 @@ def _plot_multiple_training_stats(
     plt.tight_layout()
     if show:
         plt.show()
-
-
-if __name__ == "__main__":
-    main()

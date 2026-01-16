@@ -8,6 +8,7 @@ from typing import Iterable, List, Tuple
 from marl_path.model.stats import TrainingStats
 import matplotlib
 import marl_path.constants as consts
+import numpy as np
 
 matplotlib.use(
     "TkAgg"  # Alternative "QTAgg"
@@ -111,14 +112,33 @@ def align_runs(runs: Iterable[List]) -> List[List]:
     return [run[:min_len] for run in runs]
 
 
-def aggregate(values: List[List]) -> Tuple[List, List, List]:
+def aggregate(F: List[List]) -> Tuple[List, List, List]:
     """
     Calculate per-epoch mean, min and max across runs.
     """
-    transposed = list(zip(*values))
-    mean_values = [sum(v) / len(v) for v in transposed]
-    min_values = [min(v) for v in transposed]
-    max_values = [max(v) for v in transposed]
+    transposed = np.array(F).T
+    transposed = np.where(transposed is None, np.nan, transposed)
+    arr = np.array(
+        [[np.nan if x is None else x for x in row] for row in F],
+        dtype=float,
+    ).T
+
+    counts = np.sum(~np.isnan(arr), axis=1)
+    sums = np.nansum(arr, axis=1)
+
+    mean_values = np.divide(
+        sums,
+        counts,
+        out=np.full_like(sums, np.nan, dtype=float),
+        where=counts != 0,
+    ).tolist()
+    with np.errstate(all="ignore"):
+        # mean_values = np.nanmean(transposed, axis=1).tolist()
+        min_values = np.nanmin(transposed, axis=1).tolist()
+        max_values = np.nanmax(transposed, axis=1).tolist()
+    # mean_values = [sum(x for x in v if x is not None) / len(v) for v in transposed]
+    # min_values = [min(v) for v in transposed]
+    # max_values = [max(v) for v in transposed]
     return mean_values, min_values, max_values
 
 

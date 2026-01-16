@@ -47,14 +47,14 @@ DIST_TABLE_DIFF_PLOTTING_PARAMS = {
 
 
 def run_plotting(args: argparse.Namespace) -> None:
-    training_stats: List[TrainingStats] = _load_stats(args.stats_file)
+    training_stats: List[TrainingStats] = load_stats(args.stats_file)
     if len(training_stats) == 1:
         plot_training_stats(training_stats[0])
     else:
         plot_multiple_training_stats(training_stats)
 
 
-def _load_stats(paths: List[str]) -> List[TrainingStats]:
+def load_stats(paths: List[str]) -> List[TrainingStats]:
     """
     Returns training statistics from a stats JSON file.
     """
@@ -65,7 +65,7 @@ def _load_stats(paths: List[str]) -> List[TrainingStats]:
             json_files = _find_json_files_in_folder(
                 target_path, consts.DEFAULT_FILENAME_TRAINING_STATS
             )
-            training_stats.extend(_load_stats(json_files))
+            training_stats.extend(load_stats(json_files))
         elif not os.path.isfile(target_path):
             raise FileNotFoundError(f"Could not find stats file at {target_path}")
         else:
@@ -98,7 +98,7 @@ def _find_json_files_in_folder(
     return json_files
 
 
-def _align_runs(runs: Iterable[List]) -> List[List]:
+def align_runs(runs: Iterable[List]) -> List[List]:
     """
     Truncate all runs to the shortest length so they can be combined safely.
     """
@@ -111,7 +111,7 @@ def _align_runs(runs: Iterable[List]) -> List[List]:
     return [run[:min_len] for run in runs]
 
 
-def _aggregate(values: List[List]) -> Tuple[List, List, List]:
+def aggregate(values: List[List]) -> Tuple[List, List, List]:
     """
     Calculate per-epoch mean, min and max across runs.
     """
@@ -143,20 +143,20 @@ def plot_training_stats(training_stats: TrainingStats) -> None:
 
 
 def plot_multiple_training_stats(training_stats_list: List[TrainingStats]) -> None:
-    aligned_socs = _align_runs([stats.socs for stats in training_stats_list])
-    aligned_losses = _align_runs([stats.training_loss for stats in training_stats_list])
+    aligned_socs = align_runs([stats.socs for stats in training_stats_list])
+    aligned_losses = align_runs([stats.training_loss for stats in training_stats_list])
     socs_model = None
     socs_no_model = None
     dist_table_differences = None
 
     if all(stats.used_best_mode for stats in training_stats_list):
-        socs_model = _align_runs([stats.socs_model for stats in training_stats_list])
-        socs_no_model = _align_runs(
+        socs_model = align_runs([stats.socs_model for stats in training_stats_list])
+        socs_no_model = align_runs(
             [stats.socs_no_model for stats in training_stats_list]
         )
 
     if all(stats.has_dist_table_differences for stats in training_stats_list):
-        dist_table_differences = _align_runs(
+        dist_table_differences = align_runs(
             [stats.dist_table_differences for stats in training_stats_list]
         )
 
@@ -277,7 +277,7 @@ def _plot_multiple_training_stats(
     plt.figure(figsize=(12, 5))
     plt.subplot(1, num_columns, 1)
 
-    mean_socs, min_socs, max_socs = _aggregate(socs)
+    mean_socs, min_socs, max_socs = aggregate(socs)
     plt.plot(
         epochs,
         mean_socs,
@@ -286,10 +286,10 @@ def _plot_multiple_training_stats(
         label=SOC_PLOTTING_PARAMS["label_multiple"],
     )
     if socs_model is not None and socs_no_model is not None:
-        soc_model = _align_runs(socs_model)
-        soc_no_model = _align_runs(socs_no_model)
-        mean_soc_model, min_soc_model, max_soc_model = _aggregate(soc_model)
-        mean_soc_no_model, min_soc_no_model, max_soc_no_model = _aggregate(soc_no_model)
+        soc_model = align_runs(socs_model)
+        soc_no_model = align_runs(socs_no_model)
+        mean_soc_model, min_soc_model, max_soc_model = aggregate(soc_model)
+        mean_soc_no_model, min_soc_no_model, max_soc_no_model = aggregate(soc_no_model)
         plt.fill_between(
             epochs,
             min_soc_model,
@@ -332,7 +332,7 @@ def _plot_multiple_training_stats(
 
     plt.subplot(1, num_columns, 2)
 
-    mean_losses, _, _ = _aggregate(losses)
+    mean_losses, _, _ = aggregate(losses)
     for idx, loss in enumerate(losses):
         plt.plot(
             epochs,
@@ -361,7 +361,7 @@ def _plot_multiple_training_stats(
             mean_dist_table_differences,
             min_dist_table_differences,
             max_dist_table_differences,
-        ) = _aggregate(dist_table_differences)
+        ) = aggregate(dist_table_differences)
         plt.plot(
             epochs,
             mean_dist_table_differences,

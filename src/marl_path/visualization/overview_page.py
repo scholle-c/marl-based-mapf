@@ -1,30 +1,12 @@
-from typing import List, Tuple
+from typing import List
 import streamlit as st
 import marl_path.visualization.settings as settings
 import plotly.graph_objects as go
 from marl_path.model.stats import TrainingStats
-
-
-def align_runs(runs: List[List]) -> List[List]:
-    """
-    Truncate all runs to the shortest length so they can be combined safely.
-    """
-    runs = [list(run) for run in runs]
-    if not runs:
-        raise ValueError("No stats provided to align.")
-    min_len = min(len(run) for run in runs)
-    return [run[:min_len] for run in runs]
-
-
-def aggregate(values: List[List]) -> Tuple[List, List, List]:
-    """
-    Calculate per-epoch mean, min and max across runs.
-    """
-    transposed = list(zip(*values))
-    mean_values = [sum(v) / len(v) for v in transposed]
-    min_values = [min(v) for v in transposed]
-    max_values = [max(v) for v in transposed]
-    return mean_values, min_values, max_values
+from marl_path.visualization.plotting import (
+    align_runs,
+    aggregate,
+)
 
 
 def plot_single_series(

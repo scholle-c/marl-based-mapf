@@ -15,9 +15,9 @@ class TrainingStats:
 
     training_mode: str
     epochs: int = 0
-    training_loss: List[float] = field(default_factory=list)
-    validation_loss: List[float] = field(default_factory=list)
-    socs: List[int] = field(default_factory=list)
+    training_loss: List[float | None] = field(default_factory=list)
+    validation_loss: List[float | None] = field(default_factory=list)
+    socs: List[int | None] = field(default_factory=list)
     socs_model: List[int | None] = field(default_factory=list)
     socs_no_model: List[int | None] = field(default_factory=list)
     dist_table_differences: List[float | None] = field(default_factory=list)
@@ -52,8 +52,8 @@ class TrainingStats:
 
     def record_epoch(
         self,
-        train_loss: float,
-        soc: int,
+        train_loss: float | None,
+        soc: int | None,
         val_loss: float | None = None,
         soc_model: int | None = None,
         soc_no_model: int | None = None,

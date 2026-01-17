@@ -193,8 +193,8 @@ def plot_multiple_training_stats(training_stats_list: List[TrainingStats]) -> No
 
 def _plot_training_stats(
     num_epochs: int,
-    socs: List[int],
-    losses: List[float],
+    socs: List[int | None],
+    losses: List[float | None],
     socs_model: List | None = None,
     socs_no_model: List | None = None,
     dist_table_differences: List | None = None,
@@ -209,6 +209,13 @@ def _plot_training_stats(
         losses (List[float]): List of losses per epoch.
         stats_paths (List[str]): List of paths to the stats files.
     """
+
+    # Fill None values with np.nan for plotting
+    socs_cleaned: List[float] = [s if s is not None else np.nan for s in socs]
+    losses_cleaned: List[float] = [
+        loss if loss is not None else np.nan for loss in losses
+    ]
+
     plt.figure(figsize=(12, 5))
     epochs = list(range(1, num_epochs + 1))
 
@@ -220,7 +227,7 @@ def _plot_training_stats(
     plt.subplot(1, num_columns, 1)
     plt.plot(
         epochs,
-        socs,
+        socs_cleaned,
         color=SOC_PLOTTING_PARAMS["color"],
         marker=SOC_PLOTTING_PARAMS["marker"],
         label=SOC_PLOTTING_PARAMS["label"],
@@ -249,7 +256,7 @@ def _plot_training_stats(
     plt.subplot(1, num_columns, 2)
     plt.plot(
         epochs,
-        losses,
+        losses_cleaned,
         marker=LOSSES_PLOTTING_PARAMS["marker"],
         color=LOSSES_PLOTTING_PARAMS["color"],
         label=LOSSES_PLOTTING_PARAMS["label"],

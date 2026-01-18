@@ -44,12 +44,15 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
 
     stack = data.reshape(n_blocks, map_heigh, map_width)
 
+    # Plotting Options:
+    show_distances = st.checkbox("Show Distance Values", value=False)
+
     fig = go.Figure()
     fig.add_trace(
         go.Heatmap(
             z=stack[0],
             colorscale="Viridis",
-            text=stack[0],
+            text=stack[0] if show_distances else None,
             texttemplate="%{text}",
             textfont={"size": 12},
             showscale=True,
@@ -61,7 +64,7 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
                 go.Heatmap(
                     z=stack[i],
                     colorscale="Viridis",
-                    text=stack[i],
+                    text=stack[i] if show_distances else None,
                     texttemplate="%{text}",
                     textfont={"size": 12},
                     showscale=True,

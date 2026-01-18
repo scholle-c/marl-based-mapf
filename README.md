@@ -75,7 +75,7 @@ output_folder = "output/my_run"
 | `--flg-star, --no-flg-star` | Choose LaCAM* (default) or vanilla LaCAM. | `True` |
 | `--use-pretraining, --no-use-pretraining` | Pretrain the distance table model on map-size defaults before LaCAM training. | `False` |
 | `--use-neighbors, --no-use-neighbors` | Include neighboring cells in the loss computation. | `False` |
-| `--dist-table-record-mode` | Record distance tables during training: 0 none, 1 every 10 epochs, 2 only when model beats LaCAM, 3 every epoch. | `0` |
+| `--dist-table-record-mode` | Record distance tables during training: 0 none, 1 every 10 epochs, 2 only when model beats LaCAM, 3 every epoch, 4 every epoch but only one agent. | `0` |
 
 ## Visualizer
 

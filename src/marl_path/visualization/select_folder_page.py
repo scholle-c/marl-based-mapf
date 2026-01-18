@@ -1,6 +1,6 @@
 import streamlit as st
 import marl_path.visualization.settings as settings
-from marl_path.visualization.plotting import load_stats
+from marl_path.visualization.plotting import load_stats, load_dist_tables
 
 
 def go_up_click():
@@ -68,5 +68,8 @@ if load_data_btn:
     with st.spinner("Loading data..."):
         settings.train_stats = load_stats(selected_training)
         settings.selected_folders = selected_training.copy()
+        settings.dist_tables_model, settings.dist_tables_lacam = load_dist_tables(
+            selected_training
+        )
     st.success("Done")
     st.switch_page(settings.OVERVIEW_PAGE)

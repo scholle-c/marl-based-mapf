@@ -75,6 +75,46 @@ def load_stats(paths: List[str]) -> List[TrainingStats]:
     return training_stats
 
 
+def load_dist_tables(paths: List[str]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """
+    Looks in the provided folder or filepath for csv-files containing the history
+    of the predicted distance tables. Files are identified via the filename in the
+    constants.py.
+
+    Args:
+        paths (List[str]): One ore multiple paths to folders or csv files containing distance tables.
+
+    Returns:
+        Tuple[List[np.ndarray], List[np.ndarray]]: First list contains the model-distance tables, the
+        second list the distance tables from lacam.
+    """
+    dist_tables_lacam = _load_dist_tables(
+        paths, consts.DEFAULT_FILENAME_DIST_TABLE_LACAM
+    )
+    dist_tables_model = _load_dist_tables(
+        paths, consts.DEFAULT_FILENAME_DIST_TABLE_MODEL
+    )
+    return dist_tables_model, dist_tables_lacam
+
+
+def _load_dist_tables(paths: List[str], filename: str) -> List[np.ndarray]:
+    """
+    Returns the distance table history from csv files.
+    """
+    dist_tables = []
+    for path in paths:
+        target_path = path
+        if os.path.isdir(target_path):
+            csv_files = _find_csv_files_in_folder(target_path, filename)
+            dist_tables.extend(_load_dist_tables(csv_files, filename))
+        elif not os.path.isfile(target_path):
+            raise FileNotFoundError(f"Could not find dist-table file at {target_path}")
+        else:
+            dist_table = np.loadtxt(target_path, delimiter=",")
+            dist_tables.append(dist_table)
+    return dist_tables
+
+
 def _find_json_files_in_folder(
     folder_path: str, filename: str | None = None
 ) -> List[str]:
@@ -97,6 +137,29 @@ def _find_json_files_in_folder(
                 continue
             json_files.append(os.path.join(root, file))
     return json_files
+
+
+def _find_csv_files_in_folder(
+    folder_path: str, filename: str | None = None
+) -> List[str]:
+    """
+    Looks for csv files in a given folder and returns their filepath as a list.
+
+    Args:
+        folder_path (str): Path to the folder
+        filename (str | None): If given, only csv files with this name are returned.
+    Returns:
+        List[str]: A list of found csv filepaths. Is empty if no csv file was found.
+    """
+    csv_files = []
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if not file.endswith(".csv"):
+                continue
+            if filename is not None and file != filename:
+                continue
+            csv_files.append(os.path.join(root, file))
+    return csv_files
 
 
 def align_runs(runs: Iterable[List]) -> List[List]:

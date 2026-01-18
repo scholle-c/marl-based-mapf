@@ -105,6 +105,8 @@ def _run_model_training(
         training_mode=args.training_mode,
         used_device=device.type,
         used_seed=getattr(args, "seed_training", None),
+        map_size=grid.shape,
+        num_agents=args.num_agents,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found_model = False

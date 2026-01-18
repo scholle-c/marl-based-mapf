@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Any
+from typing import List, Any, Tuple
 import json
 import numpy as np
 import os
 import marl_path.constants as consts
+
+
+STORE_LACAM_TABLE_ONLY_ONCE: bool = True
 
 
 @dataclass
@@ -26,6 +29,8 @@ class TrainingStats:
     dist_tables_model: List = field(default_factory=list)
     used_device: str | None = None
     used_seed: int | None = None
+    map_size: Tuple | None = None
+    num_agents: int | None = None
 
     @property
     def used_best_mode(self) -> bool:
@@ -93,8 +98,7 @@ class TrainingStats:
         if self.dist_table_record_mode == 1:
             if (self.epochs - 1) % 10 == 0:
                 self.dist_tables_model.append(dist_tables_model)
-                if dist_tables_lacam is not None:
-                    self.dist_tables_lacam.append(dist_tables_lacam)
+                self._add_distance_tables_lacam(dist_tables_lacam)
         elif self.dist_table_record_mode == 2:
             if self.epochs == 1:
                 return
@@ -105,10 +109,24 @@ class TrainingStats:
                 and self.socs_model[-1] < self.socs_no_model[-1]
             ):
                 self.dist_tables_model.append(dist_tables_model)
-                self.dist_tables_lacam.append(dist_tables_lacam)
+                self._add_distance_tables_lacam(dist_tables_lacam)
         elif self.dist_table_record_mode == 3:
             self.dist_tables_model.append(dist_tables_model)
-            if dist_tables_lacam is not None:
+            self._add_distance_tables_lacam(dist_tables_lacam)
+        elif self.dist_table_record_mode == 4:
+            self.dist_tables_model.append([dist_tables_model[0]])
+            self._add_distance_tables_lacam(dist_tables_lacam, use_one_agent=True)
+
+    def _add_distance_tables_lacam(
+        self, dist_tables_lacam: List | None, use_one_agent: bool = False
+    ):
+        if STORE_LACAM_TABLE_ONLY_ONCE and self.epochs > 1:
+            return
+
+        if dist_tables_lacam is not None:
+            if use_one_agent:
+                self.dist_tables_lacam.append([dist_tables_lacam[0]])
+            else:
                 self.dist_tables_lacam.append(dist_tables_lacam)
 
     def save(self, output_folder: str) -> None:
@@ -165,6 +183,8 @@ class TrainingStats:
             socs_model=data["socs_model"],
             socs_no_model=data["socs_no_model"],
             dist_table_differences=data["dist_table_differences"],
+            map_size=data["map_size"],
+            num_agents=data["num_agents"],
         )
 
     def _to_dict(self) -> dict[str, Any]:
@@ -173,6 +193,8 @@ class TrainingStats:
             "training_mode": self.training_mode,
             "used_device": self.used_device,
             "used_seed": self.used_seed,
+            "map_size": self.map_size,
+            "num_agents": self.num_agents,
             "epochs": self.epochs,
             "training_loss": self.training_loss,
             "validation_loss": self.validation_loss,

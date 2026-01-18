@@ -1,84 +1,99 @@
 # streamlit_app.py
-import os
-import numpy as np
+from typing import List
+from marl_path.model import TrainingStats
 import streamlit as st
 import plotly.graph_objects as go
-import marl_path.constants as consts
+import marl_path.visualization.settings as settings
 
-BASE_DIR = "./output"
-MAP_WIDTH = 4
-MAP_HEIGHT = 6
 
-st.title("Training Plots")
-folders = sorted(
-    d for d in os.listdir(BASE_DIR) if os.path.isdir(os.path.join(BASE_DIR, d))
-)
+def render_overview(training_stats: List[TrainingStats]) -> None:
+    if not training_stats:
+        st.info("No training-data selected")
+        return
 
-selected = st.selectbox("Ergebnisordner", folders)
-dist_table_type = st.selectbox("Distanztabellentyp", ["Model", "LaCAM"])
+    st.title("Training Plots")
+    selected = st.selectbox("Select displayed folder", settings.selected_folders)
+    dist_table_type = st.selectbox("Select distance table type", ["Model", "LaCAM"])
 
-if dist_table_type == "LaCAM":
-    filename = consts.DEFAULT_FILENAME_DIST_TABLE_LACAM
-else:
-    filename = consts.DEFAULT_FILENAME_DIST_TABLE_MODEL
+    idx = settings.selected_folders.index(selected)
+    selected_stats: TrainingStats = settings.train_stats[idx]
 
-csv_path = os.path.join(BASE_DIR, selected, filename)
+    if selected_stats.map_size is None:
+        st.info(
+            "No information available about the map size, so the distance tables cannot be displayed"
+        )
+        return
 
-data = np.loadtxt(csv_path, delimiter=",")
-n_blocks = data.shape[0] // MAP_HEIGHT
-n_agents = data.shape[1] // MAP_WIDTH
-selected_agent = st.slider("Agent", 0, n_agents - 1, 0)
-data = data[:, selected_agent * MAP_WIDTH : (selected_agent + 1) * MAP_WIDTH]
+    map_width = selected_stats.map_size[1]
+    map_heigh = selected_stats.map_size[0]
 
-stack = data.reshape(n_blocks, MAP_HEIGHT, MAP_WIDTH)
+    if dist_table_type == "LaCAM":
+        dist_tables = settings.dist_tables_lacam
+    else:
+        dist_tables = settings.dist_tables_model
 
-fig = go.Figure()
-fig.add_trace(
-    go.Heatmap(
-        z=stack[0],
-        colorscale="Viridis",
-        text=stack[0],
-        texttemplate="%{text}",
-        textfont={"size": 12},
-        showscale=True,
+    data = dist_tables[idx]
+
+    n_blocks = data.shape[0] // map_heigh
+    n_agents = data.shape[1] // map_width
+    if n_agents > 1:
+        selected_agent = st.slider("Agent", 0, n_agents - 1, 0)
+    else:
+        selected_agent = 0
+    data = data[:, selected_agent * map_width : (selected_agent + 1) * map_width]
+
+    stack = data.reshape(n_blocks, map_heigh, map_width)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Heatmap(
+            z=stack[0],
+            colorscale="Viridis",
+            text=stack[0],
+            texttemplate="%{text}",
+            textfont={"size": 12},
+            showscale=True,
+        )
     )
-)
-fig.frames = [
-    go.Frame(
-        data=[
-            go.Heatmap(
-                z=stack[i],
-                colorscale="Viridis",
-                text=stack[i],
-                texttemplate="%{text}",
-                textfont={"size": 12},
-                showscale=True,
-            )
-        ],
-        name=str(i),
+    fig.frames = [
+        go.Frame(
+            data=[
+                go.Heatmap(
+                    z=stack[i],
+                    colorscale="Viridis",
+                    text=stack[i],
+                    texttemplate="%{text}",
+                    textfont={"size": 12},
+                    showscale=True,
+                )
+            ],
+            name=str(i),
+        )
+        for i in range(n_blocks)
+    ]
+
+    steps = [
+        dict(
+            method="animate",
+            args=[
+                [str(i)],
+                {
+                    "mode": "immediate",
+                    "frame": {"duration": 0},
+                    "transition": {"duration": 0},
+                },
+            ],
+            label=str(i),
+        )
+        for i in range(n_blocks)
+    ]
+
+    fig.update_layout(
+        sliders=[dict(active=0, steps=steps, x=0.1, y=0, len=0.8)],
+        margin=dict(l=20, r=20, t=30, b=20),
     )
-    for i in range(n_blocks)
-]
 
-steps = [
-    dict(
-        method="animate",
-        args=[
-            [str(i)],
-            {
-                "mode": "immediate",
-                "frame": {"duration": 0},
-                "transition": {"duration": 0},
-            },
-        ],
-        label=str(i),
-    )
-    for i in range(n_blocks)
-]
+    st.plotly_chart(fig, width="stretch")
 
-fig.update_layout(
-    sliders=[dict(active=0, steps=steps, x=0.1, y=0, len=0.8)],
-    margin=dict(l=20, r=20, t=30, b=20),
-)
 
-st.plotly_chart(fig, width="stretch")
+render_overview(settings.train_stats)

@@ -10,4 +10,5 @@ OVERVIEW_PAGE = "overview_page.py"
 cwd: Path = Path(BASE_DIR)
 selected_folders: List = []
 train_stats: List[TrainingStats] = []
-dist_tables: List = []
+dist_tables_model: List = []
+dist_tables_lacam: List = []

@@ -122,6 +122,13 @@ def main():
         help="mode for recording distance tables during training. 0: no recording, 1: record every 10 epochs, 2: record, when model outperforms LaCAM, 3: record all epochs. WARINING: storage intensive with large maps and number of agents!",
     )
 
+    parser.add_argument(
+        "--goal-weight",
+        type=float,
+        default=1.0,
+        help="Weight of the loss value for the goal prediction, which has the target value 0.",
+    )
+
     args = parser.parse_args()
     if args.config_file is not None:
         config = load_config(args.config_file)

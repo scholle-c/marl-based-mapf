@@ -7,6 +7,9 @@ import json
 import numpy as np
 import os
 import marl_path.constants as consts
+from importlib.metadata import version
+
+__version__ = version("marl-path")
 
 
 STORE_LACAM_TABLE_ONLY_ONCE: bool = True
@@ -166,8 +169,10 @@ class TrainingStats:
 
     def _save_as_json(self, filepath: str) -> None:
         """Save statistics to a JSON file."""
+        data = self._to_dict()
+        data["version"] = __version__
         with open(filepath, "w") as f:
-            json.dump(self._to_dict(), f, indent=4)
+            json.dump(data, f, indent=4)
 
     @classmethod
     def load_from_json(cls, filepath: str) -> TrainingStats:

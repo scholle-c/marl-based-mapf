@@ -20,6 +20,7 @@ def train_on_lacam_solution(
     map: Any,
     device: torch.device | None = None,
     use_neighbors: bool = False,
+    goal_weight: float = 1.0,
 ) -> float:
     """
     RL fine-tuning based on a LaCAM solution.
@@ -33,6 +34,7 @@ def train_on_lacam_solution(
         goals: Goal configuration for each agent.
         map: Grid map of the environment.
         use_neighbors: Whether to include neighboring cells in the loss computation.
+        goal_weight: Weight for samples at the goal (target == 0).
     """
 
     model.train()
@@ -62,8 +64,18 @@ def train_on_lacam_solution(
 
     values_tensor = torch.stack(values)
     targets_tensor = torch.stack(targets)
+    weights_tensor = torch.ones_like(targets_tensor)
+    weights_tensor = torch.where(
+        targets_tensor == 0,
+        torch.tensor(
+            goal_weight, device=targets_tensor.device, dtype=targets_tensor.dtype
+        ),
+        weights_tensor,
+    )
 
-    mean_loss = torch.nn.functional.mse_loss(values_tensor, targets_tensor)
+    loss = torch.nn.functional.mse_loss(values_tensor, targets_tensor, reduction="none")
+    # Emphasize the goal position (target == 0) via weighting.
+    mean_loss = (loss * weights_tensor).mean()
     mean_loss.backward()
     optimizer.step()
     return mean_loss.item()
@@ -256,69 +268,6 @@ def _get_neighbor_target(
     targets = np.append(targets, targets_on_path)
     target = min(targets) + 1.0
     return torch.tensor(target, device=device, dtype=torch.float32, requires_grad=False)
-
-
-def _legacy_code_get_agent_values_targets(
-    map: Any, start: Any, goal: Any, model: Any, solution: Any, device: Any
-) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    # This is an old and potentially buggy version of the function. It is kept here for reference.
-    raise NotImplementedError("This is legacy code and should not be used.")
-
-    values = []
-    targets = []
-
-    input_tensor = build_input_tensor(map, goal, start).to(device)
-    dist_table = model(input_tensor).squeeze(0).squeeze(0)
-    dist_table_paths = dist_table.detach().clone()
-    dist_table_paths[goal] = 0
-
-    visited_neighbors: set = set()
-    visited_path: set = set()
-    visited_path.add(goal)
-
-    values.append(dist_table[goal])
-    targets.append(torch.tensor(0.0, device=device))
-
-    num_time_steps = len(solution)
-    i = 1
-    for t in range(num_time_steps - 1, 0, -1):
-        pos_t = solution[t]
-        pos_t_prev = solution[t - 1]
-
-        if pos_t == goal:
-            v_t = torch.tensor(0.0, device=device)
-        else:
-            v_t = dist_table[pos_t]
-        v_t_prev = dist_table[pos_t_prev]
-
-        target = v_t.detach() + 1.0
-
-        values.append(v_t_prev)
-        targets.append(target)
-
-        # Is later used for neighbor distance calculation
-
-        dist_table_paths[pos_t_prev] = i
-        i += 1
-        neighbors = get_neighbors(map, pos_t_prev)
-        visited_neighbors.update(neighbors)
-        visited_path.add(pos_t_prev)
-
-    # Now compute neighbor values and add them to the loss
-    visited_neighbors = visited_neighbors - visited_path
-
-    for neighbor in visited_neighbors:
-        min_dist: torch.Tensor | None = None
-        for pos in get_neighbors(map, neighbor):
-            candidate = dist_table_paths[pos]
-            if min_dist is None or candidate < min_dist:
-                min_dist = candidate
-        if min_dist is None:
-            continue
-        values.append(dist_table[neighbor])
-        targets.append(torch.tensor(min_dist.detach().clone() + 1.0, device=device))
-
-    return values, targets
 
 
 def pretrain_on_default_value(

@@ -213,6 +213,7 @@ def _run_model_training(
             grid,
             device=device,
             use_neighbors=args.use_neighbors,
+            goal_weight=args.goal_weight,
         )
 
         training_stats.record_epoch(

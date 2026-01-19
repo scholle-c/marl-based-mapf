@@ -7,6 +7,8 @@ import os
 from typing import Iterable, List, Tuple
 from marl_path.model.stats import TrainingStats
 import matplotlib
+import marl_path.constants as consts
+import numpy as np
 
 matplotlib.use(
     "TkAgg"  # Alternative "QTAgg"
@@ -45,29 +47,15 @@ DIST_TABLE_DIFF_PLOTTING_PARAMS = {
 }
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Plot training statistics for distance table CNN model."
-    )
-    parser.add_argument(
-        "--stats-file",
-        type=str,
-        nargs="+",
-        required=True,
-        help=(
-            "Path(s) to JSON stats files or folders containing training_stats.json. "
-            "Provide multiple to visualize distribution."
-        ),
-    )
-    args = parser.parse_args()
-    training_stats: List[TrainingStats] = _load_stats(args.stats_file)
+def run_plotting(args: argparse.Namespace) -> None:
+    training_stats: List[TrainingStats] = load_stats(args.stats_file)
     if len(training_stats) == 1:
         plot_training_stats(training_stats[0])
     else:
         plot_multiple_training_stats(training_stats)
 
 
-def _load_stats(paths: List[str]) -> List[TrainingStats]:
+def load_stats(paths: List[str]) -> List[TrainingStats]:
     """
     Returns training statistics from a stats JSON file.
     """
@@ -75,8 +63,10 @@ def _load_stats(paths: List[str]) -> List[TrainingStats]:
     for path in paths:
         target_path = path
         if os.path.isdir(target_path):
-            json_files = _find_json_files_in_folder(target_path)
-            training_stats.extend(_load_stats(json_files))
+            json_files = _find_json_files_in_folder(
+                target_path, consts.DEFAULT_FILENAME_TRAINING_STATS
+            )
+            training_stats.extend(load_stats(json_files))
         elif not os.path.isfile(target_path):
             raise FileNotFoundError(f"Could not find stats file at {target_path}")
         else:
@@ -85,26 +75,94 @@ def _load_stats(paths: List[str]) -> List[TrainingStats]:
     return training_stats
 
 
-def _find_json_files_in_folder(folder_path: str) -> List[str]:
+def load_dist_tables(paths: List[str]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """
+    Looks in the provided folder or filepath for csv-files containing the history
+    of the predicted distance tables. Files are identified via the filename in the
+    constants.py.
+
+    Args:
+        paths (List[str]): One ore multiple paths to folders or csv files containing distance tables.
+
+    Returns:
+        Tuple[List[np.ndarray], List[np.ndarray]]: First list contains the model-distance tables, the
+        second list the distance tables from lacam.
+    """
+    dist_tables_lacam = _load_dist_tables(
+        paths, consts.DEFAULT_FILENAME_DIST_TABLE_LACAM
+    )
+    dist_tables_model = _load_dist_tables(
+        paths, consts.DEFAULT_FILENAME_DIST_TABLE_MODEL
+    )
+    return dist_tables_model, dist_tables_lacam
+
+
+def _load_dist_tables(paths: List[str], filename: str) -> List[np.ndarray]:
+    """
+    Returns the distance table history from csv files.
+    """
+    dist_tables = []
+    for path in paths:
+        target_path = path
+        if os.path.isdir(target_path):
+            csv_files = _find_csv_files_in_folder(target_path, filename)
+            dist_tables.extend(_load_dist_tables(csv_files, filename))
+        elif not os.path.isfile(target_path):
+            raise FileNotFoundError(f"Could not find dist-table file at {target_path}")
+        else:
+            dist_table = np.loadtxt(target_path, delimiter=",")
+            dist_tables.append(dist_table)
+    return dist_tables
+
+
+def _find_json_files_in_folder(
+    folder_path: str, filename: str | None = None
+) -> List[str]:
     """
     _find_json_files_in_folder Looks for json files in a given folder and returns
     their filepath as a list.
 
     Args:
         folder_path (str): Path to the folder
-
+        filename (str | None): If given, only json files with this name are returned.
     Returns:
         List[str]: A list of found json filepaths. Is empty if no json file was found.
     """
     json_files = []
     for root, _, files in os.walk(folder_path):
         for file in files:
-            if file.endswith(".json"):
-                json_files.append(os.path.join(root, file))
+            if not file.endswith(".json"):
+                continue
+            if filename is not None and file != filename:
+                continue
+            json_files.append(os.path.join(root, file))
     return json_files
 
 
-def _align_runs(runs: Iterable[List]) -> List[List]:
+def _find_csv_files_in_folder(
+    folder_path: str, filename: str | None = None
+) -> List[str]:
+    """
+    Looks for csv files in a given folder and returns their filepath as a list.
+
+    Args:
+        folder_path (str): Path to the folder
+        filename (str | None): If given, only csv files with this name are returned.
+    Returns:
+        List[str]: A list of found csv filepaths. Is empty if no csv file was found.
+    """
+    csv_files = []
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if not file.endswith(".csv"):
+                continue
+            if filename is not None and file != filename:
+                continue
+            csv_files.append(os.path.join(root, file))
+    return csv_files
+
+
+def align_runs(runs: Iterable[List]) -> List[List]:
     """
     Truncate all runs to the shortest length so they can be combined safely.
     """
@@ -117,14 +175,33 @@ def _align_runs(runs: Iterable[List]) -> List[List]:
     return [run[:min_len] for run in runs]
 
 
-def _aggregate(values: List[List]) -> Tuple[List, List, List]:
+def aggregate(F: List[List]) -> Tuple[List, List, List]:
     """
     Calculate per-epoch mean, min and max across runs.
     """
-    transposed = list(zip(*values))
-    mean_values = [sum(v) / len(v) for v in transposed]
-    min_values = [min(v) for v in transposed]
-    max_values = [max(v) for v in transposed]
+    transposed = np.array(F).T
+    transposed = np.where(transposed is None, np.nan, transposed)
+    arr = np.array(
+        [[np.nan if x is None else x for x in row] for row in F],
+        dtype=float,
+    ).T
+
+    counts = np.sum(~np.isnan(arr), axis=1)
+    sums = np.nansum(arr, axis=1)
+
+    mean_values = np.divide(
+        sums,
+        counts,
+        out=np.full_like(sums, np.nan, dtype=float),
+        where=counts != 0,
+    ).tolist()
+    with np.errstate(all="ignore"):
+        # mean_values = np.nanmean(transposed, axis=1).tolist()
+        min_values = np.nanmin(transposed, axis=1).tolist()
+        max_values = np.nanmax(transposed, axis=1).tolist()
+    # mean_values = [sum(x for x in v if x is not None) / len(v) for v in transposed]
+    # min_values = [min(v) for v in transposed]
+    # max_values = [max(v) for v in transposed]
     return mean_values, min_values, max_values
 
 
@@ -149,20 +226,20 @@ def plot_training_stats(training_stats: TrainingStats) -> None:
 
 
 def plot_multiple_training_stats(training_stats_list: List[TrainingStats]) -> None:
-    aligned_socs = _align_runs([stats.socs for stats in training_stats_list])
-    aligned_losses = _align_runs([stats.training_loss for stats in training_stats_list])
+    aligned_socs = align_runs([stats.socs for stats in training_stats_list])
+    aligned_losses = align_runs([stats.training_loss for stats in training_stats_list])
     socs_model = None
     socs_no_model = None
     dist_table_differences = None
 
     if all(stats.used_best_mode for stats in training_stats_list):
-        socs_model = _align_runs([stats.socs_model for stats in training_stats_list])
-        socs_no_model = _align_runs(
+        socs_model = align_runs([stats.socs_model for stats in training_stats_list])
+        socs_no_model = align_runs(
             [stats.socs_no_model for stats in training_stats_list]
         )
 
     if all(stats.has_dist_table_differences for stats in training_stats_list):
-        dist_table_differences = _align_runs(
+        dist_table_differences = align_runs(
             [stats.dist_table_differences for stats in training_stats_list]
         )
 
@@ -179,8 +256,8 @@ def plot_multiple_training_stats(training_stats_list: List[TrainingStats]) -> No
 
 def _plot_training_stats(
     num_epochs: int,
-    socs: List[int],
-    losses: List[float],
+    socs: List[int | None],
+    losses: List[float | None],
     socs_model: List | None = None,
     socs_no_model: List | None = None,
     dist_table_differences: List | None = None,
@@ -195,6 +272,13 @@ def _plot_training_stats(
         losses (List[float]): List of losses per epoch.
         stats_paths (List[str]): List of paths to the stats files.
     """
+
+    # Fill None values with np.nan for plotting
+    socs_cleaned: List[float] = [s if s is not None else np.nan for s in socs]
+    losses_cleaned: List[float] = [
+        loss if loss is not None else np.nan for loss in losses
+    ]
+
     plt.figure(figsize=(12, 5))
     epochs = list(range(1, num_epochs + 1))
 
@@ -206,7 +290,7 @@ def _plot_training_stats(
     plt.subplot(1, num_columns, 1)
     plt.plot(
         epochs,
-        socs,
+        socs_cleaned,
         color=SOC_PLOTTING_PARAMS["color"],
         marker=SOC_PLOTTING_PARAMS["marker"],
         label=SOC_PLOTTING_PARAMS["label"],
@@ -235,7 +319,7 @@ def _plot_training_stats(
     plt.subplot(1, num_columns, 2)
     plt.plot(
         epochs,
-        losses,
+        losses_cleaned,
         marker=LOSSES_PLOTTING_PARAMS["marker"],
         color=LOSSES_PLOTTING_PARAMS["color"],
         label=LOSSES_PLOTTING_PARAMS["label"],
@@ -283,7 +367,7 @@ def _plot_multiple_training_stats(
     plt.figure(figsize=(12, 5))
     plt.subplot(1, num_columns, 1)
 
-    mean_socs, min_socs, max_socs = _aggregate(socs)
+    mean_socs, min_socs, max_socs = aggregate(socs)
     plt.plot(
         epochs,
         mean_socs,
@@ -292,10 +376,10 @@ def _plot_multiple_training_stats(
         label=SOC_PLOTTING_PARAMS["label_multiple"],
     )
     if socs_model is not None and socs_no_model is not None:
-        soc_model = _align_runs(socs_model)
-        soc_no_model = _align_runs(socs_no_model)
-        mean_soc_model, min_soc_model, max_soc_model = _aggregate(soc_model)
-        mean_soc_no_model, min_soc_no_model, max_soc_no_model = _aggregate(soc_no_model)
+        soc_model = align_runs(socs_model)
+        soc_no_model = align_runs(socs_no_model)
+        mean_soc_model, min_soc_model, max_soc_model = aggregate(soc_model)
+        mean_soc_no_model, min_soc_no_model, max_soc_no_model = aggregate(soc_no_model)
         plt.fill_between(
             epochs,
             min_soc_model,
@@ -338,7 +422,7 @@ def _plot_multiple_training_stats(
 
     plt.subplot(1, num_columns, 2)
 
-    mean_losses, _, _ = _aggregate(losses)
+    mean_losses, _, _ = aggregate(losses)
     for idx, loss in enumerate(losses):
         plt.plot(
             epochs,
@@ -367,7 +451,7 @@ def _plot_multiple_training_stats(
             mean_dist_table_differences,
             min_dist_table_differences,
             max_dist_table_differences,
-        ) = _aggregate(dist_table_differences)
+        ) = aggregate(dist_table_differences)
         plt.plot(
             epochs,
             mean_dist_table_differences,
@@ -399,7 +483,3 @@ def _plot_multiple_training_stats(
     plt.tight_layout()
     if show:
         plt.show()
-
-
-if __name__ == "__main__":
-    main()

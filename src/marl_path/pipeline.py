@@ -13,23 +13,24 @@ from .pycam import LaCAM
 from typing import Tuple
 import torch
 import os
-from .constants import TRAIN_MODE_LACAM_ONLY, TRAIN_MODE_BEST
+import marl_path.constants as consts
 from loguru import logger
+import numpy as np
+import json
 
 SEED_MAX = 2**32 - 1
 
 
-# TODO: Der Seed scheint aktuell noch nicht zu funktionieren, ergebnisse sind nicht reproduzierbar --> Liegt ggf am pretraining.
 def run_pipeline(args: argparse.Namespace) -> None:
     logger.info("starting MARL-path pipeline in mode: {}", args.training_mode)
-    if args.training_mode == TRAIN_MODE_LACAM_ONLY:
+    if args.training_mode == consts.TRAIN_MODE_LACAM_ONLY:
         _run_lacam_only(args)
         return
 
     model, training_stats = _run_model_training(args)
 
     logger.info("training completed.")
-    if args.training_mode == TRAIN_MODE_BEST:
+    if args.training_mode == consts.TRAIN_MODE_BEST:
         logger.info(
             "Successful model epochs: {} out of {} epochs ({:.2f}%)",
             training_stats.successful_model_epochs,
@@ -41,16 +42,39 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     if args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
-        model_path = os.path.join(args.output_dir, "trained_model.pt")
+        # Model saving
+        model_path = os.path.join(
+            args.output_dir, consts.DEFAULT_FILENAME_TRAINED_MODEL
+        )
         torch.save(model.state_dict(), model_path)
+        # Training stats saving
         training_stats.save(args.output_dir)
+        # Arguments saving
+        args_path = os.path.join(args.output_dir, consts.DEFAULT_FILENAME_USED_CONFIG)
+        data = {
+            k: (str(v) if hasattr(v, "__fspath__") else v)
+            for k, v in vars(args).items()
+        }
+        with open(args_path, "w") as f:
+            json.dump(data, f, indent=4)
+        logger.info("Saved trained model and training stats to {}", args.output_dir)
 
 
 def _initialize_model(
-    path: str | None, device: torch.device, apply_pretraining: bool = False, grid=None
+    path: str | None,
+    device: torch.device,
+    apply_pretraining: bool = False,
+    grid=None,
+    seed: int | None = None,
 ) -> DistanceTableCNN:
     if path is not None:
         return load_model(path, device=device)
+
+    if seed is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
 
     model = DistanceTableCNN().to(device)
     if apply_pretraining:
@@ -70,14 +94,22 @@ def _run_model_training(
     starts, goals = get_scenario(args.scen_file, args.num_agents)
     device: torch.device = _get_device(args.device)
     model: DistanceTableCNN | None = _initialize_model(
-        args.model_file, device, apply_pretraining=args.use_pretraining, grid=grid
+        args.model_file,
+        device,
+        apply_pretraining=args.use_pretraining,
+        grid=grid,
+        seed=getattr(args, "seed_training", None),
     )
     training_stats: TrainingStats = TrainingStats(
         dist_table_record_mode=args.dist_table_record_mode,
         training_mode=args.training_mode,
+        used_device=device.type,
+        used_seed=getattr(args, "seed_training", None),
+        map_size=grid.shape,
+        num_agents=args.num_agents,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    solution_found = False
+    solution_found_model = False
     random_seed_gen = random.Random(args.seed)
 
     logger.info(
@@ -88,12 +120,15 @@ def _run_model_training(
         args.seed,
     )
 
+    soc_with_model = None
+    soc_without_model = None
+
     # Start training loop
     for epoch in range(args.epochs):
         logger.info(f"\n====== Epoch {epoch + 1}/{args.epochs} ======")
         seed = random_seed_gen.randint(0, SEED_MAX)
 
-        # solve MAPF
+        # solve MAPF using your model
         planner = LaCAM()
 
         solution = planner.solve(
@@ -108,15 +143,14 @@ def _run_model_training(
             verbose=args.verbose,
         )
         if len(solution) != 0:
-            solution_found = True
+            solution_found_model = True
             validate_mapf_solution(grid, starts, goals, solution)
+            soc_with_model = get_soc(solution)
 
-        soc_with_model = None
-        soc_without_model = None
         dist_tables_model = [dt.table for dt in planner.dist_tables]
         dist_tables_lacam = None
 
-        if args.training_mode == TRAIN_MODE_BEST:
+        if args.training_mode == consts.TRAIN_MODE_BEST:
             # Solve again without model
             solution_no_model = planner.solve(
                 grid=grid,
@@ -128,15 +162,26 @@ def _run_model_training(
                 flg_star=args.flg_star,
                 verbose=args.verbose,
             )
-            validate_mapf_solution(grid, starts, goals, solution_no_model)
-            soc_without_model = get_soc(solution_no_model)
-            dist_tables_lacam = [dt.table for dt in planner.dist_tables]
+            solution_found_lacam = len(solution_no_model) != 0
+            if solution_found_lacam:
+                validate_mapf_solution(grid, starts, goals, solution_no_model)
+                soc_without_model = get_soc(solution_no_model)
+                dist_tables_lacam = [dt.table for dt in planner.dist_tables]
 
-            if not solution_found:
-                solution = solution_no_model
-                soc_with_model = None
-            else:
-                soc_with_model = get_soc(solution)
+            # Check which solution is better
+            if not solution_found_model and not solution_found_lacam:
+                logger.info("No solution found this epoch.")
+                training_stats.record_epoch(
+                    train_loss=None,
+                    soc=None,
+                    soc_model=None,
+                    soc_no_model=None,
+                    dist_tables_lacam=None,
+                    dist_tables_model=None,
+                )
+                continue
+
+            if soc_without_model and soc_with_model:
                 if soc_without_model < soc_with_model:
                     solution = solution_no_model
                     logger.opt(colors=True).info(
@@ -146,6 +191,15 @@ def _run_model_training(
                     logger.opt(colors=True).info(
                         "Best solution comes from: <green>with model</green>"
                     )
+            elif soc_without_model is not None:
+                solution = solution_no_model
+                logger.opt(colors=True).info(
+                    "Best solution comes from: <red>no model</red>"
+                )
+            else:
+                logger.opt(colors=True).info(
+                    "Best solution comes from: <green>with model</green>"
+                )
 
         soc = get_soc(solution)
 
@@ -171,7 +225,7 @@ def _run_model_training(
         )
 
         logger.info(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")
-        solution_found = False
+        solution_found_model = False
     return model, training_stats
 
 

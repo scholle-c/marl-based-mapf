@@ -21,6 +21,8 @@ def train_on_lacam_solution(
     device: torch.device | None = None,
     use_neighbors: bool = False,
     goal_weight: float = 1.0,
+    use_bellman_loss: bool = True,
+    bellman_loss_weight: float = 1,
 ) -> float:
     """
     RL fine-tuning based on a LaCAM solution.
@@ -35,8 +37,11 @@ def train_on_lacam_solution(
         map: Grid map of the environment.
         use_neighbors: Whether to include neighboring cells in the loss computation.
         goal_weight: Weight for samples at the goal (target == 0).
+        use_bellman_loss: Whether to include Bellman loss in the training.
+        bellman_loss_weight: Weight for the Bellman loss component.
+    Returns:
+        Mean loss over all agents and time steps.
     """
-
     model.train()
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,17 +52,31 @@ def train_on_lacam_solution(
     values: List[torch.Tensor] = []
     targets: List[torch.Tensor] = []
 
+    total_loss = 0.0
+
     for agent_idx in range(num_agents):
         path = [solution[t][agent_idx] for t in range(len(solution))]
+        dist_table = (
+            model(
+                build_input_tensor(map, goals[agent_idx], starts[agent_idx]).to(device)
+            )
+            .squeeze(0)
+            .squeeze(0)
+        )
+
         agent_values, agent_targets = _get_agent_values_targets(
-            starts[agent_idx],
-            goals[agent_idx],
             path,
             map,
-            model,
+            dist_table,
             device,
             use_neighbors=use_neighbors,
         )
+
+        if use_bellman_loss:
+            goal_mask = np.zeros_like(map, dtype=np.float32)
+            goal_mask[goals[agent_idx]] = 1.0
+            bellman_loss_agent = bellman_loss(dist_table, map, goal_mask)
+            total_loss += bellman_loss_agent
 
         values.extend(agent_values)
         targets.extend(agent_targets)
@@ -76,17 +95,61 @@ def train_on_lacam_solution(
     loss = torch.nn.functional.mse_loss(values_tensor, targets_tensor, reduction="none")
     # Emphasize the goal position (target == 0) via weighting.
     mean_loss = (loss * weights_tensor).mean()
+    # mean_loss_weight = 0.01 TODO: Experiment with weighting, delete afterwards
+    # mean_loss = mean_loss * mean_loss_weight
+    if use_bellman_loss:
+        mean_loss += total_loss * bellman_loss_weight
     mean_loss.backward()
     optimizer.step()
     return mean_loss.item()
 
 
+def bellman_loss(dist_table: torch.Tensor, free_mask, goal_mask) -> torch.Tensor:
+    """
+    Computes the Bellman loss for the given distance table. The loss is calculated for a distance cell x via: Is there a neighbor cell y, such that dist_table[y] + 1 <= dist_table[x]?
+
+    Args:
+        dist_table (torch.Tensor): The distance table to compute the loss for.
+        free_mask (torch.Tensor): A mask indicating which cells are free (1) and which are obstacles (0).
+        goal_mask (torch.Tensor): A mask indicating the goal cells (1) and non-goal cells (0).
+    Returns:
+        torch.Tensor: The computed Bellman loss.
+    """
+    free_mask_t = torch.as_tensor(free_mask, device=dist_table.device).to(
+        dtype=dist_table.dtype
+    )
+    goal_mask_t = torch.as_tensor(goal_mask, device=dist_table.device).to(
+        dtype=dist_table.dtype
+    )
+
+    # Pad with +inf so boundary lookups don't wrap around and mask walls as +inf.
+    inf = torch.tensor(float("inf"), device=dist_table.device, dtype=dist_table.dtype)
+    masked_dist = torch.where(free_mask_t > 0, dist_table, inf)
+    padded = torch.nn.functional.pad(masked_dist, (1, 1, 1, 1), value=float(inf))
+
+    up = padded[0:-2, 1:-1]
+    down = padded[2:, 1:-1]
+    left = padded[1:-1, 0:-2]
+    right = padded[1:-1, 2:]
+
+    neighbor_min = torch.min(torch.min(up, down), torch.min(left, right))
+
+    bellman_error = dist_table - (neighbor_min + 1)
+
+    # Use ReLU to only penalize positive errors --> There must be a neighbor smaller by at least 1
+    loss = torch.relu(bellman_error)
+
+    # No penalty for walls & goal cells
+    loss = loss * free_mask_t * (1 - goal_mask_t)
+    loss = bellman_error
+
+    return loss.mean()
+
+
 def _get_agent_values_targets(
-    start: Coord,
-    goal: Coord,
     path: Any,
     map: Any,
-    model: Any,
+    dist_table: torch.Tensor,
     device: Any,
     use_neighbors: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -105,34 +168,14 @@ def _get_agent_values_targets(
     adds some sort of exploration to other areas of the map.
 
     Args:
-        start (Any): The start coordinate of the agent
-        goal (Any): The goal coordinate of the agent
         path (Any): The path the agent took from start to goal
         map (Any): The map as a 2D numpy array
-        model (Any): The distance table model used to predict the distances
+        dist_table (torch.Tensor): The distance table as a tensor
         device (Any): The device to run the model on
         use_neighbors (bool, optional): Whether to include neighbors in the tensors. Defaults to True.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: The predicted distances (Values) and the actual distances (Targets).
-    """
-    dist_table = (
-        model(build_input_tensor(map, goal, start).to(device)).squeeze(0).squeeze(0)
-    )
-    return _get_agent_values_targets_helper(
-        path, map, dist_table, device, use_neighbors
-    )
-
-
-def _get_agent_values_targets_helper(
-    path: Any,
-    map: Any,
-    dist_table: torch.Tensor,
-    device: Any,
-    use_neighbors: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Helper function for _get_agent_values_targets, see there for documentation.
     """
     values: torch.Tensor = _get_via_coordinates(dist_table, path)
     targets: torch.Tensor = torch.arange(

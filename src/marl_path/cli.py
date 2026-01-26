@@ -116,17 +116,53 @@ def main():
     )
 
     parser.add_argument(
-        "--dist-table-record-mode",
-        type=int,
-        default=0,
-        help="mode for recording distance tables during training. 0: no recording, 1: record every 10 epochs, 2: record, when model outperforms LaCAM, 3: record all epochs. WARINING: storage intensive with large maps and number of agents!",
-    )
-
-    parser.add_argument(
         "--goal-weight",
         type=float,
         default=1.0,
         help="Weight of the loss value for the goal prediction, which has the target value 0.",
+    )
+
+    parser.add_argument(
+        "--use-bellman-loss",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="whether to include the Bellman loss when training the distance table model.",
+    )
+
+    # ======== Arguments the visualization afterwards ========
+    parser.add_argument(
+        "--dist-table-record-mode",
+        type=int,
+        default=0,
+        help="mode for recording distance tables during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
+    )
+
+    parser.add_argument(
+        "--dist-table-record-granularity",
+        type=int,
+        default=10,
+        help="granularity for recording distance tables (number of epochs when recording occurs). Only relevant if dist-table-record-mode is not 0.",
+    )
+
+    parser.add_argument(
+        "--agent-path-record-mode",
+        type=int,
+        default=0,
+        help="mode for recording agent paths during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
+    )
+
+    parser.add_argument(
+        "--agent-path-record-granularity",
+        type=int,
+        default=10,
+        help="granularity for recording agent paths (number of epochs when recording occurs). Only relevant if agent-path-record-mode is not 0.",
+    )
+
+    parser.add_argument(
+        "--save-map-mask",
+        type=bool,
+        default=True,
+        help="if set to true, an outline of the map is stored for later visualization.",
     )
 
     args = parser.parse_args()

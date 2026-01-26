@@ -27,7 +27,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         _run_lacam_only(args)
         return
 
-    model, training_stats = _run_model_training(args)
+    model, training_stats, solutions = _run_model_training(args)
 
     logger.info("training completed.")
     if args.training_mode == consts.TRAIN_MODE_BEST:
@@ -48,7 +48,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         )
         torch.save(model.state_dict(), model_path)
         # Training stats saving
-        training_stats.save(args.output_dir)
+        map_mask = get_grid(args.map_file) if args.save_map_mask else None
+        training_stats.save(args.output_dir, map_mask=map_mask)
         # Arguments saving
         args_path = os.path.join(args.output_dir, consts.DEFAULT_FILENAME_USED_CONFIG)
         data = {
@@ -58,6 +59,14 @@ def run_pipeline(args: argparse.Namespace) -> None:
         with open(args_path, "w") as f:
             json.dump(data, f, indent=4)
         logger.info("Saved trained model and training stats to {}", args.output_dir)
+        # Agent paths saving
+        if len(solutions) > 0:
+            agent_paths_path = os.path.join(
+                args.output_dir, consts.DEFAULT_FILENAME_AGENT_PATHS
+            )
+            with open(agent_paths_path, "w") as f:
+                json.dump(solutions, f, indent=4)
+            logger.info("Saved agent paths to {}", agent_paths_path)
 
 
 def _initialize_model(
@@ -89,8 +98,9 @@ def _initialize_model(
 
 def _run_model_training(
     args: argparse.Namespace,
-) -> Tuple[DistanceTableCNN, TrainingStats]:
+) -> Tuple[DistanceTableCNN, TrainingStats, list]:
     grid = get_grid(args.map_file)
+    solutions: list = []
     starts, goals = get_scenario(args.scen_file, args.num_agents)
     device: torch.device = _get_device(args.device)
     model: DistanceTableCNN | None = _initialize_model(
@@ -107,6 +117,7 @@ def _run_model_training(
         used_seed=getattr(args, "seed_training", None),
         map_size=grid.shape,
         num_agents=args.num_agents,
+        dist_table_record_granularity=args.dist_table_record_granularity,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found_model = False
@@ -202,6 +213,7 @@ def _run_model_training(
                 )
 
         soc = get_soc(solution)
+        _record_solution(args, solution, solutions, epoch)
 
         # train model
         mean_loss = train_on_lacam_solution(
@@ -214,6 +226,7 @@ def _run_model_training(
             device=device,
             use_neighbors=args.use_neighbors,
             goal_weight=args.goal_weight,
+            use_bellman_loss=args.use_bellman_loss,
         )
 
         training_stats.record_epoch(
@@ -227,7 +240,7 @@ def _run_model_training(
 
         logger.info(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")
         solution_found_model = False
-    return model, training_stats
+    return model, training_stats, solutions
 
 
 def _run_lacam_only(args: argparse.Namespace) -> None:
@@ -277,3 +290,21 @@ def _get_device(device_str: str) -> torch.device:
             return torch.device("cpu")
     else:
         raise ValueError(f"Unknown device string: {device_str}")
+
+
+def _record_solution(
+    args: argparse.Namespace, solution, solutions: list, epoch: int
+) -> None:
+    if args.agent_path_record_mode == consts.AGENT_PATH_RECORD_MODE_NONE:
+        return
+    if epoch % args.agent_path_record_granularity != 0:
+        return
+    temp = []
+    if args.agent_path_record_mode == consts.AGENT_PATH_RECORD_MODE_ALL:
+        for conf in solution:
+            temp.append(conf.positions)
+        solutions.append(temp)
+    elif args.agent_path_record_mode == consts.AGENT_PATH_RECORD_MODE_ONE_AGENT:
+        for conf in solution:
+            temp.append([conf.positions[0]])
+        solutions.append(temp)

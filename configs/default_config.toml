@@ -9,8 +9,10 @@ flg_star        = false
 training_mode   = "best"
 
 # RL training settings
-epochs          = 100
+epochs          = 101
 lr              = 1e-3
 device          = "auto"
 output_dir      = "./output/default_output"
 seed_training   = 1
+dist_table_record_mode = 2
+agent_path_record_mode = 2

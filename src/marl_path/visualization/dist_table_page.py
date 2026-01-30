@@ -172,7 +172,7 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
                     "transition": {"duration": 0},
                 },
             ],
-            label=str(i),
+            label=f"{i}",
         )
         for i in range(n_blocks)
     ]
@@ -181,6 +181,8 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
         sliders=[dict(active=0, steps=steps, x=0.1, y=0, len=0.8)],
         margin=dict(l=20, r=20, t=50, b=20),
         plot_bgcolor="black",
+        xaxis=dict(tickmode="linear", dtick=1),
+        yaxis=dict(tickmode="linear", dtick=1),
         legend=dict(
             orientation="h",
             yanchor="bottom",

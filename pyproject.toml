@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "marl-path"
-version = "0.2.3"
+version = "0.2.4"
 description = "Research project, that tries to improve the LaCAM algorithm by using multi agent reinforcement learning"
 readme = "README.md"
 requires-python = ">=3.10"

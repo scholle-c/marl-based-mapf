@@ -178,8 +178,9 @@ def _get_agent_values_targets(
         Tuple[torch.Tensor, torch.Tensor]: The predicted distances (Values) and the actual distances (Targets).
     """
     values: torch.Tensor = _get_via_coordinates(dist_table, path)
-    targets: torch.Tensor = torch.arange(
-        len(path) - 1, -1, -1, device=device, dtype=torch.float32, requires_grad=False
+    targets_int = _get_path_target(path)
+    targets: torch.Tensor = torch.tensor(
+        targets_int, dtype=torch.float32, device=device, requires_grad=False
     )
 
     if use_neighbors:
@@ -201,6 +202,38 @@ def _get_agent_values_targets(
         targets = torch.cat((targets, torch.stack(target_neigh)), dim=0)
 
     return values, targets
+
+
+def _get_path_target(path: Any) -> List[int]:
+    """
+    Determines the distance values for a given path of length > 0, where the agent
+    has reached its goal. Works like this:
+    1.) Iterate from goal to start, start with trgt = 0
+    2.) When the agent moved, add trgt++ to list of targets
+    3.) When the agent waited, add trgt to list of targets
+
+    Args:
+        path (Any): Path of the agent. len(path) must be greater than zero.
+
+    Returns:
+        List[int]: A list with distance-target values
+    """
+    targets = [0]
+    trgt: int = 0
+    coord_prev = path[-1]
+    goal = path[-1]
+    for coord in reversed(path[:-1]):
+        if coord != coord_prev:
+            trgt += 1
+
+        if coord == goal:
+            targets.append(0)
+        else:
+            targets.append(trgt)
+
+        coord_prev = coord
+    targets.reverse()
+    return targets
 
 
 def _get_via_coordinates(arr: Any, coords: List[Coord]) -> Any:

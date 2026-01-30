@@ -181,14 +181,10 @@ def _run_model_training(
 
             # Check which solution is better
             if not solution_found_model and not solution_found_lacam:
-                logger.info("No solution found this epoch.")
-                training_stats.record_epoch(
-                    train_loss=None,
-                    soc=None,
-                    soc_model=None,
-                    soc_no_model=None,
-                    dist_tables_lacam=None,
-                    dist_tables_model=None,
+                _record_empty_epoch(
+                    training_stats,
+                    dist_tables_lacam=dist_tables_lacam,
+                    dist_tables_model=dist_tables_model,
                 )
                 continue
 
@@ -211,7 +207,13 @@ def _run_model_training(
                 logger.opt(colors=True).info(
                     "Best solution comes from: <green>with model</green>"
                 )
-
+        if not solution_found_model:
+            _record_empty_epoch(
+                training_stats,
+                dist_tables_lacam=dist_tables_lacam,
+                dist_tables_model=dist_tables_model,
+            )
+            continue
         soc = get_soc(solution)
         _record_solution(args, solution, solutions, epoch)
 
@@ -308,3 +310,19 @@ def _record_solution(
         for conf in solution:
             temp.append([conf.positions[0]])
         solutions.append(temp)
+
+
+def _record_empty_epoch(
+    training_stats: TrainingStats,
+    dist_tables_lacam: list | None,
+    dist_tables_model: list | None,
+) -> None:
+    logger.info("No solution found this epoch.")
+    training_stats.record_epoch(
+        train_loss=None,
+        soc=None,
+        soc_model=None,
+        soc_no_model=None,
+        dist_tables_lacam=dist_tables_lacam,
+        dist_tables_model=dist_tables_model,
+    )

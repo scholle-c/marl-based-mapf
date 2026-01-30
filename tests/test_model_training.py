@@ -11,10 +11,58 @@ from marl_path.model.training import (
     _get_neighbors_of_path,
     _get_agent_values_targets,
     bellman_loss,
+    _get_path_target
 )
 
 
 SKIP_PRETRAIN_TEST = True
+
+
+def test_get_path_target():
+    """
+    Test the _get_path_target function with a sample path and distance table.
+    """
+
+    # Sample path: (y, x) coordinates
+    path = [(2, 0), (1, 0), (1, 0), (0, 0), (0, 0)]
+    path2 = [(2, 2), (1, 2), (1, 1), (1, 0), (0, 0)]
+    path_goal_overlapping = [(1, 0), (0, 0), (0, 1), (0, 1), (0, 0), (0, 0)]
+
+    # Expected targets
+    expected_targets = [2, 1, 1, 0, 0]
+    expected_targets2 = [4, 3, 2, 1, 0]
+    expected_targets_goal_overlapping = [3, 0, 1, 1, 0, 0]
+
+    # Call the function
+    targets = _get_path_target(path)
+    targets2 = _get_path_target(path2)
+    targets_goal_overlapping = _get_path_target(path_goal_overlapping)
+    # Assertions
+    assert targets == expected_targets, (
+        f"Expected targets {expected_targets}, got {targets}"
+    )
+    assert targets2 == expected_targets2, (
+        f"Expected targets {expected_targets2}, got {targets2}"
+    )
+    assert targets_goal_overlapping == expected_targets_goal_overlapping, (
+        f"Expected targets {expected_targets_goal_overlapping}, got {targets_goal_overlapping}"
+    )
+
+
+def test_values_targets_match():
+    """ Check whether the values are associated with the correct targets. """
+    path = [(2, 1), (2, 0), (2, 0), (1, 0), (1, 0), (0, 0), (0, 0), (0, 0)]
+
+    dist_table = torch.tensor([[0, 1], 
+                               [1, 2], 
+                               [2, 3]], dtype=torch.float32)
+
+    values: torch.Tensor = _get_via_coordinates(dist_table, path)
+    targets_int = _get_path_target(path)
+    targets: torch.Tensor = torch.tensor(targets_int, dtype=torch.float32, device="cpu", requires_grad=False)
+
+    for v, t in zip(values, targets):
+        assert torch.isclose(v, t), f"Value {v.item()} does not match target {t.item()}"
 
 
 def test_bellman_loss():

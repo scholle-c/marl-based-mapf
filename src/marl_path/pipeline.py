@@ -207,7 +207,7 @@ def _run_model_training(
                 logger.opt(colors=True).info(
                     "Best solution comes from: <green>with model</green>"
                 )
-        if not solution_found_model:
+        if len(solution) == 0:
             _record_empty_epoch(
                 training_stats,
                 dist_tables_lacam=dist_tables_lacam,

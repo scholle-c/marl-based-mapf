@@ -141,8 +141,6 @@ def bellman_loss(dist_table: torch.Tensor, free_mask, goal_mask) -> torch.Tensor
 
     # No penalty for walls & goal cells
     loss = loss * free_mask_t * (1 - goal_mask_t)
-    loss = bellman_error
-
     return loss.mean()
 
 

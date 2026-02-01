@@ -365,7 +365,10 @@ def pretrain_on_default_value(
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    fill_value: int = grid.size if default_value is None else default_value
+    fill_value: int = (
+        grid.shape[0] + grid.shape[1] if default_value is None else default_value
+    )
+    # fill_value: int = grid.size if default_value is None else default_value # TODO: Experiment with using the size instead of width+height
     target_tensor: torch.Tensor = torch.full(
         size=grid.shape, fill_value=fill_value, dtype=torch.float32, device=device
     )

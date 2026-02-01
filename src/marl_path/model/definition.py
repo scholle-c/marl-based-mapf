@@ -18,11 +18,19 @@ class DistanceTableCNN(nn.Module):
         channels = in_channels
         for _ in range(depth - 1):
             layers.append(
-                nn.Conv2d(channels, hidden_channels, kernel_size=3, padding=1)
+                nn.Conv2d(
+                    channels,
+                    hidden_channels,
+                    kernel_size=3,
+                    padding=1,
+                    padding_mode="replicate",
+                )
             )
             layers.append(nn.ReLU(inplace=True))
             channels = hidden_channels
-        layers.append(nn.Conv2d(channels, 1, kernel_size=3, padding=1))
+        layers.append(
+            nn.Conv2d(channels, 1, kernel_size=3, padding=1, padding_mode="replicate")
+        )
         self.network = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

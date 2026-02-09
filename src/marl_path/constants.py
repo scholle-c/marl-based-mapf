@@ -6,6 +6,10 @@ TRAIN_MODE_MODEL: str = "model"
 TRAIN_MODE_LACAM_ONLY: str = "lacam_only"
 TRAIN_MODE_BEST: str = "best"
 
+EPSILON_FUNCTION_NONE: str = "none"
+EPSILON_FUNCTION_SINE: str = "sine"
+EPSILON_FUNCTION_FIXED: str = "fixed"
+
 DEFAULT_FILENAME_TRAINING_STATS: str = "training_stats.json"
 DEFAULT_FILENAME_USED_CONFIG: str = "used_config.json"
 DEFAULT_FILENAME_TRAINED_MODEL: str = "trained_model.pt"

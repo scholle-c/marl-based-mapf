@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Tuple, List, Dict
 import torch
 import numpy as np
+import math
 
 from .utils import build_input_tensor, build_random_input_tensor
 from marl_path.shared import get_neighbors, Coord
@@ -381,3 +382,27 @@ def pretrain_on_default_value(
         mean_loss = torch.nn.functional.mse_loss(value_tensor, target_tensor)
         mean_loss.backward()
         optimizer.step()
+
+
+def get_epsilon_sine(
+    epoch: int,
+    max_epochs: int,
+    min_epsilon: float = 0.05,
+    max_epsilon: float = 1.0,
+) -> float:
+    """
+    Computes an epsilon value that varies sinusoidally between min_epsilon and max_epsilon over the course of training epochs.
+
+    Args:
+        epoch (int): The current epoch number.
+        max_epochs (int): The total number of epochs.
+        min_epsilon (float, optional): The minimum epsilon value. Defaults to 0.05.
+        max_epsilon (float, optional): The maximum epsilon value. Defaults to 1.0.
+
+    Returns:
+        float: The computed epsilon value for the current epoch.
+    """
+    amplitude = (max_epsilon - min_epsilon) / 2
+    mid_point = (max_epsilon + min_epsilon) / 2
+    epsilon = mid_point - amplitude * math.cos(2 * math.pi * epoch / max_epochs)
+    return epsilon

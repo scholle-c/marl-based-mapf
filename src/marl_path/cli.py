@@ -60,6 +60,27 @@ def main():
     )
 
     parser.add_argument(
+        "--epsilon-function",
+        type=str,
+        default="none",
+        help="Is used for exploration: Epsilon is a chance, of choosing the worse solution over the better one to explore alternative solutions. Is only used, when training-mode=best. Choose between: 'none' (no epsilon-greedy), 'sine' (sine function over epochs), 'fixed' (1/4 epochs exploitation, 1/2 exploration, 1/4 exploitation). Default: 'none'",
+    )
+
+    parser.add_argument(
+        "--epsilon-min",
+        type=float,
+        default=0.1,
+        help="minimum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
+    )
+
+    parser.add_argument(
+        "--epsilon-max",
+        type=float,
+        default=0.8,
+        help="maximum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
+    )
+
+    parser.add_argument(
         "--model-file",
         type=Path,
         default=None,

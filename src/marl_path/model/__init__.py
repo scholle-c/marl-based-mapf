@@ -1,7 +1,11 @@
 """Package containing the pathfinding model definition and modules for training, inference and evaluation of the model."""
 
 from .definition import DistanceTableCNN
-from .training import train_on_lacam_solution, pretrain_on_default_value
+from .training import (
+    train_on_lacam_solution,
+    pretrain_on_default_value,
+    get_epsilon_sine,
+)
 from .inference import load_model
 from .evaluation import get_soc
 from .stats import TrainingStats
@@ -16,4 +20,5 @@ __all__ = [
     "pretrain_on_default_value",
     "get_soc",
     "TrainingStats",
+    "get_epsilon_sine",
 ]

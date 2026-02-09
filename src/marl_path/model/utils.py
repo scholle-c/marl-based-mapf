@@ -30,6 +30,7 @@ def build_input_tensor(
     tensor = torch.from_numpy(stacked).unsqueeze(0)
     if device is not None:
         tensor = tensor.to(device)
+    tensor = _add_coords(tensor)
     return tensor
 
 
@@ -46,4 +47,34 @@ def build_random_input_tensor(
     tensor = torch.from_numpy(stacked).unsqueeze(0)
     if device is not None:
         tensor = tensor.to(device)
+    tensor = _add_coords(tensor)
     return tensor
+
+
+def _add_coords(input_tensor: torch.Tensor) -> torch.Tensor:
+    """Add coordinate channels to the input tensor.
+
+    Args:
+        input_tensor: Input tensor of shape (batch, channels, height, width).
+
+    Returns:
+        Tensor of shape (batch, channels + 2, height, width) with added coordinate channels.
+    """
+    batch_size, _, height, width = input_tensor.shape
+
+    y_coords = (
+        torch.linspace(0, 1, steps=height)
+        .view(1, 1, height, 1)
+        .expand(batch_size, 1, height, width)
+    )
+    x_coords = (
+        torch.linspace(0, 1, steps=width)
+        .view(1, 1, 1, width)
+        .expand(batch_size, 1, height, width)
+    )
+
+    if input_tensor.is_cuda:
+        y_coords = y_coords.cuda()
+        x_coords = x_coords.cuda()
+
+    return torch.cat([input_tensor, y_coords, x_coords], dim=1)

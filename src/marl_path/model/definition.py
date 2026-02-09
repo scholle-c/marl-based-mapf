@@ -12,7 +12,7 @@ class DistanceTableCNN(nn.Module):
     to a single-channel distance map.
     """
 
-    def __init__(self, in_channels: int = 3, hidden_channels: int = 32, depth: int = 4):
+    def __init__(self, in_channels: int = 5, hidden_channels: int = 32, depth: int = 4):
         super().__init__()
         layers: list[nn.Module] = []
         channels = in_channels

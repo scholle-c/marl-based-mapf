@@ -7,6 +7,7 @@ from .model import (
     get_soc,
     pretrain_on_default_value,
     TrainingStats,
+    get_epsilon_sine,
 )
 from marl_path.shared.mapf_utils import get_grid, get_scenario, validate_mapf_solution
 from .pycam import LaCAM
@@ -122,6 +123,7 @@ def _run_model_training(
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found_model = False
     random_seed_gen = random.Random(args.seed)
+    random_epsilon_gen = random.Random(args.seed)
 
     logger.info(
         "starting training loop with parameters: epochs={}, lr={}, device={}, seed={}",
@@ -133,6 +135,7 @@ def _run_model_training(
 
     soc_with_model = None
     soc_without_model = None
+    solution = None
 
     # Start training loop
     for epoch in range(args.epochs):
@@ -142,7 +145,7 @@ def _run_model_training(
         # solve MAPF using your model
         planner = LaCAM()
 
-        solution = planner.solve(
+        solution_model = planner.solve(
             grid=grid,
             starts=starts,
             goals=goals,
@@ -153,13 +156,14 @@ def _run_model_training(
             flg_star=args.flg_star,
             verbose=args.verbose,
         )
-        if len(solution) != 0:
+        if len(solution_model) != 0:
             solution_found_model = True
-            validate_mapf_solution(grid, starts, goals, solution)
-            soc_with_model = get_soc(solution)
+            validate_mapf_solution(grid, starts, goals, solution_model)
+            soc_with_model = get_soc(solution_model)
 
         dist_tables_model = [dt.table for dt in planner.dist_tables]
         dist_tables_lacam = None
+        solution = solution_model
 
         if args.training_mode == consts.TRAIN_MODE_BEST:
             # Solve again without model
@@ -179,7 +183,6 @@ def _run_model_training(
                 soc_without_model = get_soc(solution_no_model)
                 dist_tables_lacam = [dt.table for dt in planner.dist_tables]
 
-            # Check which solution is better
             if not solution_found_model and not solution_found_lacam:
                 _record_empty_epoch(
                     training_stats,
@@ -188,25 +191,65 @@ def _run_model_training(
                 )
                 continue
 
+            # TODO: Kannst in eine eigene Methode auslagern, sowas wie "determine_best_solution"
+            # Check which solution is better
+            better_solution = None
+            worse_solution = None
+
             if soc_without_model and soc_with_model:
                 if soc_without_model < soc_with_model:
-                    solution = solution_no_model
+                    better_solution = solution_no_model
+                    worse_solution = solution_model
                     logger.opt(colors=True).info(
                         "Best solution comes from: <red>no model</red>"
                     )
                 else:
+                    better_solution = solution_model
+                    worse_solution = solution_no_model
                     logger.opt(colors=True).info(
                         "Best solution comes from: <green>with model</green>"
                     )
             elif soc_without_model is not None:
-                solution = solution_no_model
+                better_solution = solution_no_model
                 logger.opt(colors=True).info(
                     "Best solution comes from: <red>no model</red>"
                 )
             else:
+                better_solution = solution_model
                 logger.opt(colors=True).info(
                     "Best solution comes from: <green>with model</green>"
                 )
+
+            # Check for epsilon-greedy exploration
+            # TODO: Gerne auch in eine eigene Methode auslagern
+            if args.epsilon_function == consts.EPSILON_FUNCTION_FIXED:
+                epoch_fraction = epoch / args.epochs
+                if epoch_fraction < 0.05 or epoch_fraction > 0.95:
+                    epsilon = args.epsilon_min  # exploitation
+                else:
+                    epsilon = args.epsilon_max  # exploration
+            elif args.epsilon_function == consts.EPSILON_FUNCTION_SINE:
+                epsilon = get_epsilon_sine(
+                    epoch,
+                    args.epochs,
+                    args.epsilon_min,
+                    args.epsilon_max,
+                )
+            else:
+                epsilon = 0.0  # no exploration
+            random_value = random_epsilon_gen.random()
+
+            if random_value < epsilon and worse_solution is not None:
+                logger.opt(colors=True).info(
+                    "Exploration: <yellow>Using worse solution due to epsilon-greedy ({:.4f} < {:.4f})</yellow>".format(
+                        random_value, epsilon
+                    )
+                )
+                solution = worse_solution
+            else:
+                solution = better_solution
+
+        # Train model only if a solution was found
         if len(solution) == 0:
             _record_empty_epoch(
                 training_stats,
@@ -214,6 +257,7 @@ def _run_model_training(
                 dist_tables_model=dist_tables_model,
             )
             continue
+
         soc = get_soc(solution)
         _record_solution(args, solution, solutions, epoch)
 

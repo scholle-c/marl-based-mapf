@@ -7,6 +7,9 @@ import json
 import numpy as np
 import os
 import marl_path.constants as consts
+from importlib.metadata import version
+
+__version__ = version("marl-path")
 
 
 STORE_LACAM_TABLE_ONLY_ONCE: bool = True
@@ -31,6 +34,7 @@ class TrainingStats:
     used_seed: int | None = None
     map_size: Tuple | None = None
     num_agents: int | None = None
+    dist_table_record_granularity: int = 10
 
     @property
     def used_best_mode(self) -> bool:
@@ -95,25 +99,13 @@ class TrainingStats:
             )
             self.dist_table_differences.append(dist_table_difference)
 
+        if (self.epochs - 1) % self.dist_table_record_granularity != 0:
+            return
+
         if self.dist_table_record_mode == 1:
-            if (self.epochs - 1) % 10 == 0:
-                self.dist_tables_model.append(dist_tables_model)
-                self._add_distance_tables_lacam(dist_tables_lacam)
-        elif self.dist_table_record_mode == 2:
-            if self.epochs == 1:
-                return
-            if (
-                self.dist_tables_lacam is not None
-                and self.socs_model[-1] is not None
-                and self.socs_no_model[-1] is not None
-                and self.socs_model[-1] < self.socs_no_model[-1]
-            ):
-                self.dist_tables_model.append(dist_tables_model)
-                self._add_distance_tables_lacam(dist_tables_lacam)
-        elif self.dist_table_record_mode == 3:
             self.dist_tables_model.append(dist_tables_model)
             self._add_distance_tables_lacam(dist_tables_lacam)
-        elif self.dist_table_record_mode == 4:
+        elif self.dist_table_record_mode == 2:
             self.dist_tables_model.append([dist_tables_model[0]])
             self._add_distance_tables_lacam(dist_tables_lacam, use_one_agent=True)
 
@@ -129,7 +121,7 @@ class TrainingStats:
             else:
                 self.dist_tables_lacam.append(dist_tables_lacam)
 
-    def save(self, output_folder: str) -> None:
+    def save(self, output_folder: str, map_mask: np.ndarray | None = None) -> None:
         """Save statistics and distance tables to JSON files."""
         filepath_stats = os.path.join(
             output_folder, consts.DEFAULT_FILENAME_TRAINING_STATS
@@ -137,6 +129,9 @@ class TrainingStats:
         self._save_as_json(filepath_stats)
         if self.dist_table_record_mode != 0:
             self._save_dist_tables(output_folder)
+        if map_mask is not None:
+            filepath_map = os.path.join(output_folder, consts.DEFAULT_FILENAME_MAP_MASK)
+            np.savetxt(filepath_map, map_mask.astype(int), delimiter=",", fmt="%d")
 
     def _save_dist_tables(self, output_folder: str) -> None:
         """Save distance tables to a csv file."""
@@ -155,19 +150,25 @@ class TrainingStats:
             filepath_lacam = os.path.join(
                 output_folder, consts.DEFAULT_FILENAME_DIST_TABLE_LACAM
             )
-            np.savetxt(filepath_lacam, dist_tables_lacam_array, delimiter=",", fmt="%d")
+            np.savetxt(
+                filepath_lacam, dist_tables_lacam_array, delimiter=",", fmt="%.2f"
+            )
 
         if self.dist_tables_model:
             dist_tables_model_array = concat_dist_tables(self.dist_tables_model)
             filepath_model = os.path.join(
                 output_folder, consts.DEFAULT_FILENAME_DIST_TABLE_MODEL
             )
-            np.savetxt(filepath_model, dist_tables_model_array, delimiter=",", fmt="%d")
+            np.savetxt(
+                filepath_model, dist_tables_model_array, delimiter=",", fmt="%.2f"
+            )
 
     def _save_as_json(self, filepath: str) -> None:
         """Save statistics to a JSON file."""
+        data = self._to_dict()
+        data["version"] = __version__
         with open(filepath, "w") as f:
-            json.dump(self._to_dict(), f, indent=4)
+            json.dump(data, f, indent=4)
 
     @classmethod
     def load_from_json(cls, filepath: str) -> TrainingStats:

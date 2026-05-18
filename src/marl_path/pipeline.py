@@ -7,6 +7,7 @@ from .model import (
     get_soc,
     pretrain_on_default_value,
     TrainingStats,
+    get_epsilon_sine,
 )
 from marl_path.shared.mapf_utils import get_grid, get_scenario, validate_mapf_solution
 from .pycam import LaCAM
@@ -17,17 +18,27 @@ import marl_path.constants as consts
 from loguru import logger
 import numpy as np
 import json
+from pathlib import Path
 
 SEED_MAX = 2**32 - 1
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
+    if args.output_dir is not None:
+        os.makedirs(args.output_dir, exist_ok=True)
+        log_path = Path(args.output_dir) / "logs_{time:YYYY-MM-DD_HH-mm-ss}.log"
+        logger.add(
+        str(log_path),
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        )
+    
+    logger.info("MARL-path pipeline started with arguments: {}", args)
     logger.info("starting MARL-path pipeline in mode: {}", args.training_mode)
     if args.training_mode == consts.TRAIN_MODE_LACAM_ONLY:
         _run_lacam_only(args)
         return
 
-    model, training_stats = _run_model_training(args)
+    model, training_stats, solutions = _run_model_training(args)
 
     logger.info("training completed.")
     if args.training_mode == consts.TRAIN_MODE_BEST:
@@ -48,7 +59,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         )
         torch.save(model.state_dict(), model_path)
         # Training stats saving
-        training_stats.save(args.output_dir)
+        map_mask = get_grid(args.map_file) if args.save_map_mask else None
+        training_stats.save(args.output_dir, map_mask=map_mask)
         # Arguments saving
         args_path = os.path.join(args.output_dir, consts.DEFAULT_FILENAME_USED_CONFIG)
         data = {
@@ -58,6 +70,14 @@ def run_pipeline(args: argparse.Namespace) -> None:
         with open(args_path, "w") as f:
             json.dump(data, f, indent=4)
         logger.info("Saved trained model and training stats to {}", args.output_dir)
+        # Agent paths saving
+        if len(solutions) > 0:
+            agent_paths_path = os.path.join(
+                args.output_dir, consts.DEFAULT_FILENAME_AGENT_PATHS
+            )
+            with open(agent_paths_path, "w") as f:
+                json.dump(solutions, f, indent=4)
+            logger.info("Saved agent paths to {}", agent_paths_path)
 
 
 def _initialize_model(
@@ -89,8 +109,9 @@ def _initialize_model(
 
 def _run_model_training(
     args: argparse.Namespace,
-) -> Tuple[DistanceTableCNN, TrainingStats]:
+) -> Tuple[DistanceTableCNN, TrainingStats, list]:
     grid = get_grid(args.map_file)
+    solutions: list = []
     starts, goals = get_scenario(args.scen_file, args.num_agents)
     device: torch.device = _get_device(args.device)
     model: DistanceTableCNN | None = _initialize_model(
@@ -107,10 +128,12 @@ def _run_model_training(
         used_seed=getattr(args, "seed_training", None),
         map_size=grid.shape,
         num_agents=args.num_agents,
+        dist_table_record_granularity=args.dist_table_record_granularity,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     solution_found_model = False
     random_seed_gen = random.Random(args.seed)
+    random_epsilon_gen = random.Random(args.seed)
 
     logger.info(
         "starting training loop with parameters: epochs={}, lr={}, device={}, seed={}",
@@ -120,35 +143,37 @@ def _run_model_training(
         args.seed,
     )
 
-    soc_with_model = None
-    soc_without_model = None
-
     # Start training loop
     for epoch in range(args.epochs):
         logger.info(f"\n====== Epoch {epoch + 1}/{args.epochs} ======")
+        soc_with_model = None
+        soc_without_model = None
+        solution = None
         seed = random_seed_gen.randint(0, SEED_MAX)
+        time_limit_ms = args.time_limit_ms
 
         # solve MAPF using your model
         planner = LaCAM()
 
-        solution = planner.solve(
+        solution_model = planner.solve(
             grid=grid,
             starts=starts,
             goals=goals,
             model=model,
             device=device,
             seed=seed,
-            time_limit_ms=args.time_limit_ms,
+            time_limit_ms=time_limit_ms,
             flg_star=args.flg_star,
             verbose=args.verbose,
         )
-        if len(solution) != 0:
+        if len(solution_model) != 0:
             solution_found_model = True
-            validate_mapf_solution(grid, starts, goals, solution)
-            soc_with_model = get_soc(solution)
+            validate_mapf_solution(grid, starts, goals, solution_model)
+            soc_with_model = get_soc(solution_model)
 
         dist_tables_model = [dt.table for dt in planner.dist_tables]
         dist_tables_lacam = None
+        solution = solution_model
 
         if args.training_mode == consts.TRAIN_MODE_BEST:
             # Solve again without model
@@ -168,40 +193,83 @@ def _run_model_training(
                 soc_without_model = get_soc(solution_no_model)
                 dist_tables_lacam = [dt.table for dt in planner.dist_tables]
 
-            # Check which solution is better
             if not solution_found_model and not solution_found_lacam:
-                logger.info("No solution found this epoch.")
-                training_stats.record_epoch(
-                    train_loss=None,
-                    soc=None,
-                    soc_model=None,
-                    soc_no_model=None,
-                    dist_tables_lacam=None,
-                    dist_tables_model=None,
+                _record_empty_epoch(
+                    training_stats,
+                    dist_tables_lacam=dist_tables_lacam,
+                    dist_tables_model=dist_tables_model,
                 )
                 continue
 
+            # TODO: Kannst in eine eigene Methode auslagern, sowas wie "determine_best_solution"
+            # Check which solution is better
+            better_solution = None
+            worse_solution = None
+
             if soc_without_model and soc_with_model:
                 if soc_without_model < soc_with_model:
-                    solution = solution_no_model
+                    better_solution = solution_no_model
+                    worse_solution = solution_model
                     logger.opt(colors=True).info(
                         "Best solution comes from: <red>no model</red>"
                     )
                 else:
+                    better_solution = solution_model
+                    worse_solution = solution_no_model
                     logger.opt(colors=True).info(
                         "Best solution comes from: <green>with model</green>"
                     )
             elif soc_without_model is not None:
-                solution = solution_no_model
+                better_solution = solution_no_model
                 logger.opt(colors=True).info(
                     "Best solution comes from: <red>no model</red>"
                 )
             else:
+                better_solution = solution_model
                 logger.opt(colors=True).info(
                     "Best solution comes from: <green>with model</green>"
                 )
 
+            # Check for epsilon-greedy exploration
+            # TODO: Gerne auch in eine eigene Methode auslagern
+            if args.epsilon_function == consts.EPSILON_FUNCTION_FIXED:
+                epoch_fraction = epoch / args.epochs
+                if epoch_fraction < 0.05 or epoch_fraction > 0.95:
+                    epsilon = args.epsilon_min  # exploitation
+                else:
+                    epsilon = args.epsilon_max  # exploration
+            elif args.epsilon_function == consts.EPSILON_FUNCTION_SINE:
+                epsilon = get_epsilon_sine(
+                    epoch,
+                    args.epochs,
+                    args.epsilon_min,
+                    args.epsilon_max,
+                )
+            else:
+                epsilon = 0.0  # no exploration
+            random_value = random_epsilon_gen.random()
+
+            if random_value < epsilon and worse_solution is not None:
+                logger.opt(colors=True).info(
+                    "Exploration: <yellow>Using worse solution due to epsilon-greedy ({:.4f} < {:.4f})</yellow>".format(
+                        random_value, epsilon
+                    )
+                )
+                solution = worse_solution
+            else:
+                solution = better_solution
+
+        # Train model only if a solution was found
+        if len(solution) == 0:
+            _record_empty_epoch(
+                training_stats,
+                dist_tables_lacam=dist_tables_lacam,
+                dist_tables_model=dist_tables_model,
+            )
+            continue
+
         soc = get_soc(solution)
+        _record_solution(args, solution, solutions, epoch)
 
         # train model
         mean_loss = train_on_lacam_solution(
@@ -213,6 +281,8 @@ def _run_model_training(
             grid,
             device=device,
             use_neighbors=args.use_neighbors,
+            goal_weight=args.goal_weight,
+            use_bellman_loss=args.use_bellman_loss,
         )
 
         training_stats.record_epoch(
@@ -226,7 +296,7 @@ def _run_model_training(
 
         logger.info(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")
         solution_found_model = False
-    return model, training_stats
+    return model, training_stats, solutions
 
 
 def _run_lacam_only(args: argparse.Namespace) -> None:
@@ -276,3 +346,37 @@ def _get_device(device_str: str) -> torch.device:
             return torch.device("cpu")
     else:
         raise ValueError(f"Unknown device string: {device_str}")
+
+
+def _record_solution(
+    args: argparse.Namespace, solution, solutions: list, epoch: int
+) -> None:
+    if args.agent_path_record_mode == consts.AGENT_PATH_RECORD_MODE_NONE:
+        return
+    if epoch % args.agent_path_record_granularity != 0:
+        return
+    temp = []
+    if args.agent_path_record_mode == consts.AGENT_PATH_RECORD_MODE_ALL:
+        for conf in solution:
+            temp.append(conf.positions)
+        solutions.append(temp)
+    elif args.agent_path_record_mode == consts.AGENT_PATH_RECORD_MODE_ONE_AGENT:
+        for conf in solution:
+            temp.append([conf.positions[0]])
+        solutions.append(temp)
+
+
+def _record_empty_epoch(
+    training_stats: TrainingStats,
+    dist_tables_lacam: list | None,
+    dist_tables_model: list | None,
+) -> None:
+    logger.info("No solution found this epoch.")
+    training_stats.record_epoch(
+        train_loss=None,
+        soc=None,
+        soc_model=None,
+        soc_no_model=None,
+        dist_tables_lacam=dist_tables_lacam,
+        dist_tables_model=dist_tables_model,
+    )

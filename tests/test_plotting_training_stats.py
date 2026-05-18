@@ -38,3 +38,16 @@ def test_loading_training_stats():
 
     training_stats = plotting.load_stats([DATA_FOLDER])
     assert len(training_stats) > 0
+
+
+def test_aggregate_handles_none_values():
+    values = [
+        [1, None, 3],
+        [2, 4, None],
+    ]
+
+    mean_values, min_values, max_values = plotting.aggregate(values)
+
+    assert mean_values == [1.5, 4.0, 3.0]
+    assert min_values == [1.0, 4.0, 3.0]
+    assert max_values == [2.0, 4.0, 3.0]

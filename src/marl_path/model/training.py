@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Tuple, List, Dict
 import torch
 import numpy as np
+import math
 
 from .utils import build_input_tensor, build_random_input_tensor
 from marl_path.shared import get_neighbors, Coord
@@ -20,6 +21,9 @@ def train_on_lacam_solution(
     map: Any,
     device: torch.device | None = None,
     use_neighbors: bool = False,
+    goal_weight: float = 1.0,
+    use_bellman_loss: bool = True,
+    bellman_loss_weight: float = 1,
 ) -> float:
     """
     RL fine-tuning based on a LaCAM solution.
@@ -33,8 +37,12 @@ def train_on_lacam_solution(
         goals: Goal configuration for each agent.
         map: Grid map of the environment.
         use_neighbors: Whether to include neighboring cells in the loss computation.
+        goal_weight: Weight for samples at the goal (target == 0).
+        use_bellman_loss: Whether to include Bellman loss in the training.
+        bellman_loss_weight: Weight for the Bellman loss component.
+    Returns:
+        Mean loss over all agents and time steps.
     """
-
     model.train()
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -45,36 +53,102 @@ def train_on_lacam_solution(
     values: List[torch.Tensor] = []
     targets: List[torch.Tensor] = []
 
+    total_loss = 0.0
+
     for agent_idx in range(num_agents):
         path = [solution[t][agent_idx] for t in range(len(solution))]
+        dist_table = (
+            model(
+                build_input_tensor(map, goals[agent_idx], starts[agent_idx]).to(device)
+            )
+            .squeeze(0)
+            .squeeze(0)
+        )
+
         agent_values, agent_targets = _get_agent_values_targets(
-            starts[agent_idx],
-            goals[agent_idx],
             path,
             map,
-            model,
+            dist_table,
             device,
             use_neighbors=use_neighbors,
         )
+
+        if use_bellman_loss:
+            goal_mask = np.zeros_like(map, dtype=np.float32)
+            goal_mask[goals[agent_idx]] = 1.0
+            bellman_loss_agent = bellman_loss(dist_table, map, goal_mask)
+            total_loss += bellman_loss_agent
 
         values.extend(agent_values)
         targets.extend(agent_targets)
 
     values_tensor = torch.stack(values)
     targets_tensor = torch.stack(targets)
+    weights_tensor = torch.ones_like(targets_tensor)
+    weights_tensor = torch.where(
+        targets_tensor == 0,
+        torch.tensor(
+            goal_weight, device=targets_tensor.device, dtype=targets_tensor.dtype
+        ),
+        weights_tensor,
+    )
 
-    mean_loss = torch.nn.functional.mse_loss(values_tensor, targets_tensor)
+    loss = torch.nn.functional.mse_loss(values_tensor, targets_tensor, reduction="none")
+    # Emphasize the goal position (target == 0) via weighting.
+    mean_loss = (loss * weights_tensor).mean()
+    # mean_loss_weight = 0.01 TODO: Experiment with weighting, delete afterwards
+    # mean_loss = mean_loss * mean_loss_weight
+    if use_bellman_loss:
+        mean_loss += total_loss * bellman_loss_weight
     mean_loss.backward()
     optimizer.step()
     return mean_loss.item()
 
 
+def bellman_loss(dist_table: torch.Tensor, free_mask, goal_mask) -> torch.Tensor:
+    """
+    Computes the Bellman loss for the given distance table. The loss is calculated for a distance cell x via: Is there a neighbor cell y, such that dist_table[y] + 1 <= dist_table[x]?
+
+    Args:
+        dist_table (torch.Tensor): The distance table to compute the loss for.
+        free_mask (torch.Tensor): A mask indicating which cells are free (1) and which are obstacles (0).
+        goal_mask (torch.Tensor): A mask indicating the goal cells (1) and non-goal cells (0).
+    Returns:
+        torch.Tensor: The computed Bellman loss.
+    """
+    free_mask_t = torch.as_tensor(free_mask, device=dist_table.device).to(
+        dtype=dist_table.dtype
+    )
+    goal_mask_t = torch.as_tensor(goal_mask, device=dist_table.device).to(
+        dtype=dist_table.dtype
+    )
+
+    # Pad with +inf so boundary lookups don't wrap around and mask walls as +inf.
+    inf = torch.tensor(float("inf"), device=dist_table.device, dtype=dist_table.dtype)
+    masked_dist = torch.where(free_mask_t > 0, dist_table, inf)
+    padded = torch.nn.functional.pad(masked_dist, (1, 1, 1, 1), value=float(inf))
+
+    up = padded[0:-2, 1:-1]
+    down = padded[2:, 1:-1]
+    left = padded[1:-1, 0:-2]
+    right = padded[1:-1, 2:]
+
+    neighbor_min = torch.min(torch.min(up, down), torch.min(left, right))
+
+    bellman_error = dist_table - (neighbor_min + 1)
+
+    # Use ReLU to only penalize positive errors --> There must be a neighbor smaller by at least 1
+    loss = torch.relu(bellman_error)
+
+    # No penalty for walls & goal cells
+    loss = loss * free_mask_t * (1 - goal_mask_t)
+    return loss.mean()
+
+
 def _get_agent_values_targets(
-    start: Coord,
-    goal: Coord,
     path: Any,
     map: Any,
-    model: Any,
+    dist_table: torch.Tensor,
     device: Any,
     use_neighbors: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -93,38 +167,19 @@ def _get_agent_values_targets(
     adds some sort of exploration to other areas of the map.
 
     Args:
-        start (Any): The start coordinate of the agent
-        goal (Any): The goal coordinate of the agent
         path (Any): The path the agent took from start to goal
         map (Any): The map as a 2D numpy array
-        model (Any): The distance table model used to predict the distances
+        dist_table (torch.Tensor): The distance table as a tensor
         device (Any): The device to run the model on
         use_neighbors (bool, optional): Whether to include neighbors in the tensors. Defaults to True.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: The predicted distances (Values) and the actual distances (Targets).
     """
-    dist_table = (
-        model(build_input_tensor(map, goal, start).to(device)).squeeze(0).squeeze(0)
-    )
-    return _get_agent_values_targets_helper(
-        path, map, dist_table, device, use_neighbors
-    )
-
-
-def _get_agent_values_targets_helper(
-    path: Any,
-    map: Any,
-    dist_table: torch.Tensor,
-    device: Any,
-    use_neighbors: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Helper function for _get_agent_values_targets, see there for documentation.
-    """
     values: torch.Tensor = _get_via_coordinates(dist_table, path)
-    targets: torch.Tensor = torch.arange(
-        len(path) - 1, -1, -1, device=device, dtype=torch.float32, requires_grad=False
+    targets_int = _get_path_target(path)
+    targets: torch.Tensor = torch.tensor(
+        targets_int, dtype=torch.float32, device=device, requires_grad=False
     )
 
     if use_neighbors:
@@ -146,6 +201,38 @@ def _get_agent_values_targets_helper(
         targets = torch.cat((targets, torch.stack(target_neigh)), dim=0)
 
     return values, targets
+
+
+def _get_path_target(path: Any) -> List[int]:
+    """
+    Determines the distance values for a given path of length > 0, where the agent
+    has reached its goal. Works like this:
+    1.) Iterate from goal to start, start with trgt = 0
+    2.) When the agent moved, add trgt++ to list of targets
+    3.) When the agent waited, add trgt to list of targets
+
+    Args:
+        path (Any): Path of the agent. len(path) must be greater than zero.
+
+    Returns:
+        List[int]: A list with distance-target values
+    """
+    targets = [0]
+    trgt: int = 0
+    coord_prev = path[-1]
+    goal = path[-1]
+    for coord in reversed(path[:-1]):
+        if coord != coord_prev:
+            trgt += 1
+
+        if coord == goal:
+            targets.append(0)
+        else:
+            targets.append(trgt)
+
+        coord_prev = coord
+    targets.reverse()
+    return targets
 
 
 def _get_via_coordinates(arr: Any, coords: List[Coord]) -> Any:
@@ -258,69 +345,6 @@ def _get_neighbor_target(
     return torch.tensor(target, device=device, dtype=torch.float32, requires_grad=False)
 
 
-def _legacy_code_get_agent_values_targets(
-    map: Any, start: Any, goal: Any, model: Any, solution: Any, device: Any
-) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    # This is an old and potentially buggy version of the function. It is kept here for reference.
-    raise NotImplementedError("This is legacy code and should not be used.")
-
-    values = []
-    targets = []
-
-    input_tensor = build_input_tensor(map, goal, start).to(device)
-    dist_table = model(input_tensor).squeeze(0).squeeze(0)
-    dist_table_paths = dist_table.detach().clone()
-    dist_table_paths[goal] = 0
-
-    visited_neighbors: set = set()
-    visited_path: set = set()
-    visited_path.add(goal)
-
-    values.append(dist_table[goal])
-    targets.append(torch.tensor(0.0, device=device))
-
-    num_time_steps = len(solution)
-    i = 1
-    for t in range(num_time_steps - 1, 0, -1):
-        pos_t = solution[t]
-        pos_t_prev = solution[t - 1]
-
-        if pos_t == goal:
-            v_t = torch.tensor(0.0, device=device)
-        else:
-            v_t = dist_table[pos_t]
-        v_t_prev = dist_table[pos_t_prev]
-
-        target = v_t.detach() + 1.0
-
-        values.append(v_t_prev)
-        targets.append(target)
-
-        # Is later used for neighbor distance calculation
-
-        dist_table_paths[pos_t_prev] = i
-        i += 1
-        neighbors = get_neighbors(map, pos_t_prev)
-        visited_neighbors.update(neighbors)
-        visited_path.add(pos_t_prev)
-
-    # Now compute neighbor values and add them to the loss
-    visited_neighbors = visited_neighbors - visited_path
-
-    for neighbor in visited_neighbors:
-        min_dist: torch.Tensor | None = None
-        for pos in get_neighbors(map, neighbor):
-            candidate = dist_table_paths[pos]
-            if min_dist is None or candidate < min_dist:
-                min_dist = candidate
-        if min_dist is None:
-            continue
-        values.append(dist_table[neighbor])
-        targets.append(torch.tensor(min_dist.detach().clone() + 1.0, device=device))
-
-    return values, targets
-
-
 def pretrain_on_default_value(
     model: Any,
     grid: Any,
@@ -342,7 +366,10 @@ def pretrain_on_default_value(
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    fill_value: int = grid.size if default_value is None else default_value
+    fill_value: int = (
+        grid.shape[0] + grid.shape[1] if default_value is None else default_value
+    )
+    # fill_value: int = grid.size if default_value is None else default_value # TODO: Experiment with using the size instead of width+height
     target_tensor: torch.Tensor = torch.full(
         size=grid.shape, fill_value=fill_value, dtype=torch.float32, device=device
     )
@@ -355,3 +382,27 @@ def pretrain_on_default_value(
         mean_loss = torch.nn.functional.mse_loss(value_tensor, target_tensor)
         mean_loss.backward()
         optimizer.step()
+
+
+def get_epsilon_sine(
+    epoch: int,
+    max_epochs: int,
+    min_epsilon: float = 0.05,
+    max_epsilon: float = 1.0,
+) -> float:
+    """
+    Computes an epsilon value that varies sinusoidally between min_epsilon and max_epsilon over the course of training epochs.
+
+    Args:
+        epoch (int): The current epoch number.
+        max_epochs (int): The total number of epochs.
+        min_epsilon (float, optional): The minimum epsilon value. Defaults to 0.05.
+        max_epsilon (float, optional): The maximum epsilon value. Defaults to 1.0.
+
+    Returns:
+        float: The computed epsilon value for the current epoch.
+    """
+    amplitude = (max_epsilon - min_epsilon) / 2
+    mid_point = (max_epsilon + min_epsilon) / 2
+    epsilon = mid_point - amplitude * math.cos(2 * math.pi * epoch / max_epochs)
+    return epsilon

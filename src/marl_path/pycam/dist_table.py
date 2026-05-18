@@ -50,8 +50,8 @@ class DistTable:
         with torch.no_grad():
             output: torch.Tensor = self.model(self.input_tensor)  # type: ignore
         dist_table: np.ndarray = output.squeeze(0).squeeze(0).cpu().numpy()
-        dist_value: int = int(dist_table[target])
-        self.table = dist_table.astype(int)
+        dist_value: float = dist_table[target]#dist_value: int = int(dist_table[target])
+        self.table = dist_table#.astype(int)
         return dist_value  # type: ignore
 
     def compute_table_bfs(self, target: Coord) -> int:

@@ -60,6 +60,27 @@ def main():
     )
 
     parser.add_argument(
+        "--epsilon-function",
+        type=str,
+        default="none",
+        help="Is used for exploration: Epsilon is a chance, of choosing the worse solution over the better one to explore alternative solutions. Is only used, when training-mode=best. Choose between: 'none' (no epsilon-greedy), 'sine' (sine function over epochs), 'fixed' (1/4 epochs exploitation, 1/2 exploration, 1/4 exploitation). Default: 'none'",
+    )
+
+    parser.add_argument(
+        "--epsilon-min",
+        type=float,
+        default=0.1,
+        help="minimum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
+    )
+
+    parser.add_argument(
+        "--epsilon-max",
+        type=float,
+        default=0.8,
+        help="maximum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
+    )
+
+    parser.add_argument(
         "--model-file",
         type=Path,
         default=None,
@@ -116,10 +137,53 @@ def main():
     )
 
     parser.add_argument(
+        "--goal-weight",
+        type=float,
+        default=1.0,
+        help="Weight of the loss value for the goal prediction, which has the target value 0.",
+    )
+
+    parser.add_argument(
+        "--use-bellman-loss",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="whether to include the Bellman loss when training the distance table model.",
+    )
+
+    # ======== Arguments the visualization afterwards ========
+    parser.add_argument(
         "--dist-table-record-mode",
         type=int,
         default=0,
-        help="mode for recording distance tables during training. 0: no recording, 1: record every 10 epochs, 2: record, when model outperforms LaCAM, 3: record all epochs. WARINING: storage intensive with large maps and number of agents!",
+        help="mode for recording distance tables during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
+    )
+
+    parser.add_argument(
+        "--dist-table-record-granularity",
+        type=int,
+        default=10,
+        help="granularity for recording distance tables (number of epochs when recording occurs). Only relevant if dist-table-record-mode is not 0.",
+    )
+
+    parser.add_argument(
+        "--agent-path-record-mode",
+        type=int,
+        default=0,
+        help="mode for recording agent paths during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
+    )
+
+    parser.add_argument(
+        "--agent-path-record-granularity",
+        type=int,
+        default=10,
+        help="granularity for recording agent paths (number of epochs when recording occurs). Only relevant if agent-path-record-mode is not 0.",
+    )
+
+    parser.add_argument(
+        "--save-map-mask",
+        type=bool,
+        default=True,
+        help="if set to true, an outline of the map is stored for later visualization.",
     )
 
     args = parser.parse_args()

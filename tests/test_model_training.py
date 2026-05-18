@@ -9,11 +9,103 @@ from marl_path.model.training import (
     pretrain_on_default_value,
     _get_via_coordinates,
     _get_neighbors_of_path,
-    _get_agent_values_targets_helper,
+    _get_agent_values_targets,
+    bellman_loss,
+    _get_path_target
 )
 
 
 SKIP_PRETRAIN_TEST = True
+
+
+def test_get_path_target():
+    """
+    Test the _get_path_target function with a sample path and distance table.
+    """
+
+    # Sample path: (y, x) coordinates
+    path = [(2, 0), (1, 0), (1, 0), (0, 0), (0, 0)]
+    path2 = [(2, 2), (1, 2), (1, 1), (1, 0), (0, 0)]
+    path_goal_overlapping = [(1, 0), (0, 0), (0, 1), (0, 1), (0, 0), (0, 0)]
+
+    # Expected targets
+    expected_targets = [2, 1, 1, 0, 0]
+    expected_targets2 = [4, 3, 2, 1, 0]
+    expected_targets_goal_overlapping = [3, 0, 1, 1, 0, 0]
+
+    # Call the function
+    targets = _get_path_target(path)
+    targets2 = _get_path_target(path2)
+    targets_goal_overlapping = _get_path_target(path_goal_overlapping)
+    # Assertions
+    assert targets == expected_targets, (
+        f"Expected targets {expected_targets}, got {targets}"
+    )
+    assert targets2 == expected_targets2, (
+        f"Expected targets {expected_targets2}, got {targets2}"
+    )
+    assert targets_goal_overlapping == expected_targets_goal_overlapping, (
+        f"Expected targets {expected_targets_goal_overlapping}, got {targets_goal_overlapping}"
+    )
+
+
+def test_values_targets_match():
+    """ Check whether the values are associated with the correct targets. """
+    path = [(2, 1), (2, 0), (2, 0), (1, 0), (1, 0), (0, 0), (0, 0), (0, 0)]
+
+    dist_table = torch.tensor([[0, 1], 
+                               [1, 2], 
+                               [2, 3]], dtype=torch.float32)
+
+    values: torch.Tensor = _get_via_coordinates(dist_table, path)
+    targets_int = _get_path_target(path)
+    targets: torch.Tensor = torch.tensor(targets_int, dtype=torch.float32, device="cpu", requires_grad=False)
+
+    for v, t in zip(values, targets):
+        assert torch.isclose(v, t), f"Value {v.item()} does not match target {t.item()}"
+
+
+def test_bellman_loss():
+    """
+    Test the bellman_loss function with sample values and targets.
+    """
+    # Sample map
+    map_mask = np.array([[1, 0], 
+                         [1, 1], 
+                         [1, 0]], dtype=bool)
+    
+    goal_mask = np.array([[1, 0], 
+                          [0, 0], 
+                          [0, 0]], dtype=bool)
+
+
+    # Perfect distance table
+    dt_perfect = torch.tensor([[0, 6], 
+                               [1, 2], 
+                               [2, 6]], dtype=torch.float32, device="cpu")
+    # Allowed distance table (not in 1-steps, but there is a gradient towards the goal --> should yield low loss)
+    dt_gradient = torch.tensor([[0, 6], 
+                                [4, 10], 
+                                [7, 6]], dtype=torch.float32, device="cpu")
+    # Wrong distance table
+    dt_wrong = torch.tensor([[0, 6], 
+                             [3, 1], 
+                             [1, 6]], dtype=torch.float32, device="cpu")
+
+
+    loss_perfect = bellman_loss(dt_perfect, map_mask, goal_mask)
+    assert torch.isclose(loss_perfect, torch.tensor(0.0, dtype=torch.float32, device="cpu")), (
+        f"Expected loss 0.0 for perfect distance table, got {loss_perfect.item()}"
+    )
+    loss_gradient = bellman_loss(dt_gradient, map_mask, goal_mask)
+    assert loss_gradient > 0.0, (
+        f"Expected loss > 0.0 for gradient distance table, got {loss_gradient.item()}"
+    )
+
+    loss_wrong = bellman_loss(dt_wrong, map_mask, goal_mask)
+    assert loss_wrong > 0.0, (
+        f"Expected loss > 0.0 for wrong distance table, got {loss_wrong.item()}"
+    )
 
 
 def test_get_agent_values_targets():
@@ -35,7 +127,7 @@ def test_get_agent_values_targets():
     expected_targets = torch.tensor([4.0, 3.0, 2.0, 1.0, 0.0], dtype=torch.float32)
 
     # Call the function
-    values, targets = _get_agent_values_targets_helper(
+    values, targets = _get_agent_values_targets(
         path, map_array, dist_table, device="cpu", use_neighbors=False
     )
 
@@ -55,7 +147,7 @@ def test_get_agent_values_targets():
         [4.0, 3.0, 2.0, 1.0, 0.0, 1.0, 3.0], dtype=torch.float32
     )
 
-    values_with_neighbors, targets_with_neighbors = _get_agent_values_targets_helper(
+    values_with_neighbors, targets_with_neighbors = _get_agent_values_targets(
         path, map_array, dist_table, device="cpu", use_neighbors=True
     )
 

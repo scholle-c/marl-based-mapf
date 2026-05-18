@@ -1,6 +1,43 @@
+import json
+import numpy as np
 import streamlit as st
 import marl_path.visualization.settings as settings
 from marl_path.visualization.plotting import load_stats, load_dist_tables
+from marl_path.constants import DEFAULT_FILENAME_MAP_MASK, DEFAULT_FILENAME_AGENT_PATHS
+
+
+def load_map_mask(folders):
+    """
+    Lädt die map_mask.csv aus dem ersten selektierten Ordner, falls vorhanden.
+    Speichert das Ergebnis in settings.map_mask.
+    """
+    settings.map_mask = None
+    if not folders:
+        return
+    first_folder = folders[0]
+    map_mask_path = first_folder / DEFAULT_FILENAME_MAP_MASK
+    if map_mask_path.is_file():
+        settings.map_mask = np.loadtxt(map_mask_path, delimiter=",", dtype=int)
+
+
+def load_agent_paths(folders):
+    """
+    Lädt die agent_paths.json aus dem ersten selektierten Ordner, falls vorhanden.
+    Speichert das Ergebnis in settings.agent_paths.
+
+    Struktur: List[List[List[Tuple[int, int]]]]
+    - Äußerste Liste: Zeitpunkte t
+    - Mittlere Liste: Agentenpositionen zum Zeitpunkt t
+    - Innerste Liste: [x, y] Koordinaten
+    """
+    settings.agent_paths = []
+    if not folders:
+        return
+    first_folder = folders[0]
+    agent_paths_path = first_folder / DEFAULT_FILENAME_AGENT_PATHS
+    if agent_paths_path.is_file():
+        with open(agent_paths_path, "r") as f:
+            settings.agent_paths = json.load(f)
 
 
 def go_up_click():
@@ -71,5 +108,7 @@ if load_data_btn:
         settings.dist_tables_model, settings.dist_tables_lacam = load_dist_tables(
             selected_training
         )
+        load_map_mask(selected_training)
+        load_agent_paths(selected_training)
     st.success("Done")
     st.switch_page(settings.OVERVIEW_PAGE)

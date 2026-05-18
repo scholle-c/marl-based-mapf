@@ -179,8 +179,6 @@ def aggregate(F: List[List]) -> Tuple[List, List, List]:
     """
     Calculate per-epoch mean, min and max across runs.
     """
-    transposed = np.array(F).T
-    transposed = np.where(transposed is None, np.nan, transposed)
     arr = np.array(
         [[np.nan if x is None else x for x in row] for row in F],
         dtype=float,
@@ -196,12 +194,8 @@ def aggregate(F: List[List]) -> Tuple[List, List, List]:
         where=counts != 0,
     ).tolist()
     with np.errstate(all="ignore"):
-        # mean_values = np.nanmean(transposed, axis=1).tolist()
-        min_values = np.nanmin(transposed, axis=1).tolist()
-        max_values = np.nanmax(transposed, axis=1).tolist()
-    # mean_values = [sum(x for x in v if x is not None) / len(v) for v in transposed]
-    # min_values = [min(v) for v in transposed]
-    # max_values = [max(v) for v in transposed]
+        min_values = np.nanmin(arr, axis=1).tolist()
+        max_values = np.nanmax(arr, axis=1).tolist()
     return mean_values, min_values, max_values
 
 
@@ -288,13 +282,13 @@ def _plot_training_stats(
         num_columns = 3
 
     plt.subplot(1, num_columns, 1)
-    plt.plot(
-        epochs,
-        socs_cleaned,
-        color=SOC_PLOTTING_PARAMS["color"],
-        marker=SOC_PLOTTING_PARAMS["marker"],
-        label=SOC_PLOTTING_PARAMS["label"],
-    )
+    #plt.plot(
+    #    epochs,
+    #    socs_cleaned,
+    #    color=SOC_PLOTTING_PARAMS["color"],
+    #    marker=SOC_PLOTTING_PARAMS["marker"],
+    #    label=SOC_PLOTTING_PARAMS["label"],
+    #)
     if socs_model is not None and socs_no_model is not None:
         plt.plot(
             epochs,
@@ -368,13 +362,13 @@ def _plot_multiple_training_stats(
     plt.subplot(1, num_columns, 1)
 
     mean_socs, min_socs, max_socs = aggregate(socs)
-    plt.plot(
-        epochs,
-        mean_socs,
-        color=SOC_PLOTTING_PARAMS["color"],
-        linewidth=2,
-        label=SOC_PLOTTING_PARAMS["label_multiple"],
-    )
+    #plt.plot(
+    #    epochs,
+    #    mean_socs,
+    #    color=SOC_PLOTTING_PARAMS["color"],
+    #    linewidth=2,
+    #    label=SOC_PLOTTING_PARAMS["label_multiple"],
+    #)
     if socs_model is not None and socs_no_model is not None:
         soc_model = align_runs(socs_model)
         soc_no_model = align_runs(socs_no_model)
@@ -430,7 +424,7 @@ def _plot_multiple_training_stats(
             color="orange",
             alpha=0.3,
             linewidth=1,
-            label="Run losses" if idx == 0 else None,
+            label="Loss range" if idx == 0 else None,
         )
     plt.plot(
         epochs,
@@ -465,7 +459,7 @@ def _plot_multiple_training_stats(
             max_dist_table_differences,
             alpha=0.2,
             color="plum",
-            label="Distance Table Differences range",
+            #label="Distance Table Differences range",
         )
         plt.fill_between(
             epochs,

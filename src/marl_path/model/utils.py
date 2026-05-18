@@ -12,6 +12,7 @@ def build_input_tensor(
     goal: tuple[int, int],
     start: tuple[int, int],
     device: torch.device | None = None,
+    use_coord_channels: bool = True,
 ) -> torch.Tensor:
     if grid.ndim != 2:
         raise ValueError("Grid must be a 2D array.")
@@ -30,7 +31,9 @@ def build_input_tensor(
     tensor = torch.from_numpy(stacked).unsqueeze(0)
     if device is not None:
         tensor = tensor.to(device)
-    tensor = _add_coords(tensor, goal)
+
+    if use_coord_channels:
+        tensor = _add_coords(tensor, goal)
     return tensor
 
 
@@ -38,6 +41,7 @@ def build_random_input_tensor(
     grid: Grid,
     device: torch.device | None = None,
     use_random_input_channels: bool = True,
+    use_coord_channels: bool = True,
 ) -> torch.Tensor:
     random_goal = (0, 0)
     if use_random_input_channels:
@@ -69,7 +73,9 @@ def build_random_input_tensor(
     tensor = torch.from_numpy(stacked).unsqueeze(0)
     if device is not None:
         tensor = tensor.to(device)
-    tensor = _add_coords(tensor, random_goal)
+    
+    if use_coord_channels:
+        tensor = _add_coords(tensor, random_goal)
     return tensor
 
 

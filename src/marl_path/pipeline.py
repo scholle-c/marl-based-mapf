@@ -18,11 +18,21 @@ import marl_path.constants as consts
 from loguru import logger
 import numpy as np
 import json
+from pathlib import Path
 
 SEED_MAX = 2**32 - 1
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
+    if args.output_dir is not None:
+        os.makedirs(args.output_dir, exist_ok=True)
+        log_path = Path(args.output_dir) / "logs_{time:YYYY-MM-DD_HH-mm-ss}.log"
+        logger.add(
+        str(log_path),
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        )
+    
+    logger.info("MARL-path pipeline started with arguments: {}", args)
     logger.info("starting MARL-path pipeline in mode: {}", args.training_mode)
     if args.training_mode == consts.TRAIN_MODE_LACAM_ONLY:
         _run_lacam_only(args)
@@ -133,14 +143,14 @@ def _run_model_training(
         args.seed,
     )
 
-    soc_with_model = None
-    soc_without_model = None
-    solution = None
-
     # Start training loop
     for epoch in range(args.epochs):
         logger.info(f"\n====== Epoch {epoch + 1}/{args.epochs} ======")
+        soc_with_model = None
+        soc_without_model = None
+        solution = None
         seed = random_seed_gen.randint(0, SEED_MAX)
+        time_limit_ms = args.time_limit_ms
 
         # solve MAPF using your model
         planner = LaCAM()
@@ -152,7 +162,7 @@ def _run_model_training(
             model=model,
             device=device,
             seed=seed,
-            time_limit_ms=args.time_limit_ms,
+            time_limit_ms=time_limit_ms,
             flg_star=args.flg_star,
             verbose=args.verbose,
         )

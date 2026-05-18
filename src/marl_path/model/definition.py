@@ -6,13 +6,13 @@ import torch
 from torch import nn
 
 
-class DistanceTableCNNog(nn.Module):
+class DistanceTableCNN(nn.Module):
     """
     Plain CNN without pooling that maps 3-channel inputs (map, goal, start)
     to a single-channel distance map.
     """
 
-    def __init__(self, in_channels: int = 5, hidden_channels: int = 64, depth: int = 6):
+    def __init__(self, in_channels: int = 5, hidden_channels: int = 32, depth: int = 4):
         super().__init__()
         layers: list[nn.Module] = []
         channels = in_channels
@@ -38,7 +38,7 @@ class DistanceTableCNNog(nn.Module):
         return self.network(x)
 
 
-class DistanceTableCNN(nn.Module):
+class UNet(nn.Module):
     def __init__(self, in_channels: int = 5, features: int = 32):
         super().__init__()
         # Encoder

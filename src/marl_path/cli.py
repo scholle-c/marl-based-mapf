@@ -51,61 +51,45 @@ def main():
 
     # ======== Arguments for training the distance table predictor ========
     parser.add_argument(
-        "--training-mode",
+        "--pipeline-mode",
         type=str,
-        default="model",
-        help="Choose between: 'model' (train with model-based solutions), "
-        "'lacam_only' (no training, just one LaCAM execution), and 'best' "
-        "(take best solution from either LaCAM or model per epoch). Default: 'model'",
-    )
-
-    parser.add_argument(
-        "--epsilon-function",
-        type=str,
-        default="none",
-        help="Is used for exploration: Epsilon is a chance, of choosing the worse solution over the better one to explore alternative solutions. Is only used, when training-mode=best. Choose between: 'none' (no epsilon-greedy), 'sine' (sine function over epochs), 'fixed' (1/4 epochs exploitation, 1/2 exploration, 1/4 exploitation). Default: 'none'",
-    )
-
-    parser.add_argument(
-        "--epsilon-min",
-        type=float,
-        default=0.1,
-        help="minimum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
-    )
-
-    parser.add_argument(
-        "--epsilon-max",
-        type=float,
-        default=0.8,
-        help="maximum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
+        default="vdn",
+        help="Choose between: 'vdn': train the heuristic model using VDN loss",
     )
 
     parser.add_argument(
         "--model-file",
         type=Path,
         default=None,
-        help="path to a pretrained distance table CNN model",
+        help="path to a pretrained heuristic model",
     )
 
     parser.add_argument(
         "--epochs",
         type=int,
-        default=100,
-        help="number of training epochs for the distance table CNN model. Each epoch goes over an entire run of the LaCAM planner.",
+        default=200,
+        help="number of training epochs for the heuristic model. Each epoch includes solving an entire mapf instance.",
+    )
+
+    parser.add_argument(
+        "--model-initialization-mode",
+        type=int,
+        default=0,
+        help="mode for initializing the heuristic model. 0: random initialization, 1: pretrain on default value max map size (= width + height).",
     )
 
     parser.add_argument(
         "--lr",
         type=float,
         default=0.001,
-        help="learning rate for training the distance table CNN model.",
+        help="learning rate for training the heuristic model.",
     )
 
     parser.add_argument(
         "--device",
         type=str,
         default="cpu",
-        help="device to use for training the distance table CNN model (e.g., 'cpu' or 'cuda').",
+        help="device to use for training the heuristic model (e.g., 'cpu' or 'cuda').",
     )
 
     parser.add_argument(
@@ -119,71 +103,22 @@ def main():
         "--seed-training",
         type=int,
         default=0,
-        help="random seed for training the distance table CNN model.",
-    )
-
-    parser.add_argument(
-        "--use-pretraining",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="whether to pretrain the distance table model on the map size as default values before training with LaCAM.",
-    )
-
-    parser.add_argument(
-        "--use-neighbors",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="whether to include neighboring cells in the loss computation when training the distance table model.",
-    )
-
-    parser.add_argument(
-        "--goal-weight",
-        type=float,
-        default=1.0,
-        help="Weight of the loss value for the goal prediction, which has the target value 0.",
-    )
-
-    parser.add_argument(
-        "--use-bellman-loss",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="whether to include the Bellman loss when training the distance table model.",
+        help="random seed for training the heuristic model.",
     )
 
     # ======== Arguments the visualization afterwards ========
     parser.add_argument(
-        "--dist-table-record-mode",
+        "--record-mode",
         type=int,
         default=0,
-        help="mode for recording distance tables during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
+        help="mode for recording training process. 0: no recording",
     )
 
     parser.add_argument(
-        "--dist-table-record-granularity",
-        type=int,
-        default=10,
-        help="granularity for recording distance tables (number of epochs when recording occurs). Only relevant if dist-table-record-mode is not 0.",
-    )
-
-    parser.add_argument(
-        "--agent-path-record-mode",
-        type=int,
-        default=0,
-        help="mode for recording agent paths during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
-    )
-
-    parser.add_argument(
-        "--agent-path-record-granularity",
-        type=int,
-        default=10,
-        help="granularity for recording agent paths (number of epochs when recording occurs). Only relevant if agent-path-record-mode is not 0.",
-    )
-
-    parser.add_argument(
-        "--save-map-mask",
-        type=bool,
-        default=True,
-        help="if set to true, an outline of the map is stored for later visualization.",
+        "--comparison-algorithm",
+        type=str,
+        default="none",
+        help="algorithm for comparison during training. 'none': no comparison, 'lacam': compare with LaCAM, 'model': compare with pretrained model without rl improvements.",
     )
 
     args = parser.parse_args()

@@ -6,7 +6,7 @@ import torch
 from typing import Optional
 
 from marl_path.shared.mapf_utils import Coord, Grid, get_neighbors, is_valid_coord
-from marl_path.model.definition import DistanceTableCNN
+from marl_path.model.definition import DefaultModel
 from marl_path.model.training import build_input_tensor
 
 
@@ -14,7 +14,7 @@ from marl_path.model.training import build_input_tensor
 class DistTable:
     grid: Grid
     goal: Coord
-    model: Optional[DistanceTableCNN] = None
+    model: Optional[DefaultModel] = None
     device: torch.device | None = None
     has_model_generated: bool = field(init=False, default=False)
     Q: deque = field(init=False)
@@ -43,7 +43,7 @@ class DistTable:
             self.has_model_generated = True
             return self.compute_table_model(target)  # type: ignore
 
-    def compute_table_model(self, target: Coord) -> None:
+    def compute_table_model(self, target: Coord) -> int:
         self.input_tensor: torch.Tensor = build_input_tensor(
             self.grid, self.goal, target, device=self.device
         )

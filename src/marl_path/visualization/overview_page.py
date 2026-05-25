@@ -106,32 +106,33 @@ def add_range_band(
 
 
 def plot_single_soc(stats: TrainingStats) -> go.Figure:
-    epochs = list(range(1, len(stats.socs) + 1))
+    socs = stats.mapf.socs if stats.mapf else []
+    epochs = list(range(1, len(socs) + 1))
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
             x=epochs,
-            y=stats.socs,
+            y=socs,
             mode="lines+markers",
             name="SOC",
             line=dict(color="blue"),
         )
     )
-    if stats.socs_model:
+    if stats.mapf and stats.mapf.socs_model:
         fig.add_trace(
             go.Scatter(
                 x=epochs,
-                y=stats.socs_model,
+                y=stats.mapf.socs_model,
                 mode="lines+markers",
                 name="SOC with Model",
                 line=dict(color="green"),
             )
         )
-    if stats.socs_no_model:
+    if stats.mapf and stats.mapf.socs_no_model:
         fig.add_trace(
             go.Scatter(
                 x=epochs,
-                y=stats.socs_no_model,
+                y=stats.mapf.socs_no_model,
                 mode="lines+markers",
                 name="SOC without Model",
                 line=dict(color="red"),
@@ -146,7 +147,9 @@ def plot_single_soc(stats: TrainingStats) -> go.Figure:
 
 
 def plot_multiple_soc(training_stats: List[TrainingStats]) -> go.Figure:
-    aligned_socs = align_runs([stats.socs for stats in training_stats])
+    aligned_socs = align_runs(
+        [stats.mapf.socs if stats.mapf else [] for stats in training_stats]
+    )
     mean_socs, min_socs, max_socs = aggregate(aligned_socs)
     epochs = list(range(1, len(mean_socs) + 1))
 
@@ -169,8 +172,14 @@ def plot_multiple_soc(training_stats: List[TrainingStats]) -> go.Figure:
         )
     )
 
-    if all(stats.socs_model for stats in training_stats):
-        aligned_soc_model = align_runs([stats.socs_model for stats in training_stats])
+    if all(stats.mapf and stats.mapf.socs_model for stats in training_stats):
+        aligned_soc_model = align_runs(
+            [
+                stats.mapf.socs_model
+                for stats in training_stats
+                if stats.mapf is not None
+            ]
+        )
         mean_model, min_model, max_model = aggregate(aligned_soc_model)
         add_range_band(
             fig,
@@ -190,9 +199,13 @@ def plot_multiple_soc(training_stats: List[TrainingStats]) -> go.Figure:
             )
         )
 
-    if all(stats.socs_no_model for stats in training_stats):
+    if all(stats.mapf and stats.mapf.socs_no_model for stats in training_stats):
         aligned_soc_no_model = align_runs(
-            [stats.socs_no_model for stats in training_stats]
+            [
+                stats.mapf.socs_no_model
+                for stats in training_stats
+                if stats.mapf is not None
+            ]
         )
         mean_no_model, min_no_model, max_no_model = aggregate(aligned_soc_no_model)
         add_range_band(
@@ -236,7 +249,7 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
             plot_single_series(
                 "Mean Loss over Epochs",
                 "Mean Loss",
-                stats.training_loss,
+                stats.learning.training_loss,
                 color="orange",
             ),
             width="stretch",
@@ -246,14 +259,16 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
                 plot_single_series(
                     "Distance Table Differences over Epochs",
                     "Mean Absolute Difference",
-                    stats.dist_table_differences,
+                    stats.dist_tables.dist_table_differences
+                    if stats.dist_tables is not None
+                    else [],
                     color="purple",
                 ),
                 width="stretch",
             )
         return
 
-    losses = [stats.training_loss for stats in training_stats]
+    losses = [stats.learning.training_loss for stats in training_stats]
     st.plotly_chart(
         plot_multiple_soc(training_stats),
         width="stretch",
@@ -269,7 +284,11 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
         width="stretch",
     )
     if all(stats.has_dist_table_differences for stats in training_stats):
-        dist_diffs = [stats.dist_table_differences for stats in training_stats]
+        dist_diffs = [
+            stats.dist_tables.dist_table_differences
+            for stats in training_stats
+            if stats.dist_tables is not None
+        ]
         st.plotly_chart(
             plot_multiple_series(
                 "Distance Table Differences over Epochs",

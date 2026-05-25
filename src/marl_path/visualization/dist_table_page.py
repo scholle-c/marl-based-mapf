@@ -19,14 +19,14 @@ def render_overview(training_stats: List[TrainingStats]) -> None:
     idx = settings.selected_folders.index(selected)
     selected_stats: TrainingStats = settings.train_stats[idx]
 
-    if selected_stats.map_size is None:
+    if selected_stats.mapf is None or selected_stats.mapf.map_size is None:
         st.info(
             "No information available about the map size, so the distance tables cannot be displayed"
         )
         return
 
-    map_width = selected_stats.map_size[1]
-    map_heigh = selected_stats.map_size[0]
+    map_width = selected_stats.mapf.map_size[1]
+    map_heigh = selected_stats.mapf.map_size[0]
 
     if dist_table_type == "LaCAM":
         dist_tables = settings.dist_tables_lacam

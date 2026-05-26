@@ -103,7 +103,7 @@ Arguments can be provided on the CLI or inside a TOML config file. CLI flags alw
 
 | Argument | Description | Default |
 | --- | --- | --- |
-| `--output-dir` | Directory to write metrics, model checkpoint, and logs. | *(package-internal path)* |
+| `--output-dir` | Directory to write metrics, model checkpoint, and logs. | `output/default_output` |
 | `--record-mode` | `0`: no output written. `1`: write metrics and model. | `1` |
 | `--record-num-agents` | Number of agents whose data is recorded. `0` records all agents. | `0` |
 | `--record-paths` | Whether to record agent paths during training. | `False` |

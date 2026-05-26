@@ -5,6 +5,18 @@ from .pipeline import run_pipeline
 from . import constants as consts
 
 
+def _dev_path(*parts: str) -> Path | None:
+    """Return a path relative to the project root only if it actually exists.
+
+    Works in an editable/dev install where the source tree is present next to
+    the package.  Returns None when installed as a regular package (e.g. inside
+    a venv on a server) so that argparse falls back to requiring the user to
+    supply the value explicitly.
+    """
+    candidate = Path(__file__).parent.parent.parent.joinpath(*parts)
+    return candidate if candidate.is_file() else None
+
+
 def main():
     parser = argparse.ArgumentParser()
 
@@ -13,20 +25,20 @@ def main():
         "-c",
         "--config-file",
         type=Path,
-        default=Path(__file__).parent.parent.parent / "configs" / "default_config.toml",
+        default=_dev_path("configs", "default_config.toml"),
     )
 
     parser.add_argument(
         "-m",
         "--map-file",
         type=Path,
-        default=Path(__file__).parent.parent.parent / "assets" / "tunnel.map",
+        default=_dev_path("assets", "tunnel.map"),
     )
     parser.add_argument(
         "-i",
         "--scen-file",
         type=Path,
-        default=Path(__file__).parent.parent.parent / "assets" / "tunnel.scen",
+        default=_dev_path("assets", "tunnel.scen"),
     )
     parser.add_argument(
         "-N",
@@ -103,7 +115,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(__file__).parent / "output",
+        default=Path("output") / "default_output",
         help="path to save metrics and results of the training and evaluation.",
     )
 

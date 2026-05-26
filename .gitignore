@@ -66,6 +66,10 @@ output/
 configs/
 assets/
 scripts/
+!scripts/run_five_times.bat
+!scripts/run_five_times.sh
+!scripts/benchmark.bat
+!scripts/benchmark.sh
 
 # Git Hooks
 pyrightconfig.json

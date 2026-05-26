@@ -1,112 +1,111 @@
 """Module for storing and handling training statistics."""
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import List, Any, Tuple
+
+import csv
 import json
-import numpy as np
 import os
-import marl_path.constants as consts
+from dataclasses import dataclass, field
+from typing import Any, List, Tuple
+
+import numpy as np
 from importlib.metadata import version
+
+import marl_path.constants as consts
 
 __version__ = version("marl-path")
 
 STORE_LACAM_TABLE_ONLY_ONCE: bool = True
 
-
-@dataclass
-class LearningStats:
-    """Tracks training and validation losses."""
-
-    training_loss: List[float | None] = field(default_factory=list)
-    validation_loss: List[float | None] = field(default_factory=list)
+_FILENAME_METRICS = "metrics.csv"
+_FILENAME_CONFIG = "config.json"
 
 
 @dataclass
 class MAPFStats:
-    """Tracks MAPF solution quality metrics."""
+    """MAPF instance metadata and per-epoch solution quality."""
 
     socs: List[int | None] = field(default_factory=list)
-    socs_model: List[int | None] = field(default_factory=list)
-    socs_no_model: List[int | None] = field(default_factory=list)
+    elapsed_times: List[float | None] = field(default_factory=list)
     num_agents: int | None = None
     map_size: Tuple | None = None
 
 
 @dataclass
 class DistTableStats:
-    """Tracks distance table comparison metrics and optionally full tables.
+    """Optional heavy-data tracking for distance table comparison.
 
-    record_mode: 0 = differences only, 1 = all agents, 2 = one agent
+    record_mode: 0 = off, 1 = all agents, 2 = one agent only
+    record_granularity: save full tables every N epochs
     """
 
-    dist_table_differences: List[float | None] = field(default_factory=list)
-    dist_tables_lacam: List = field(default_factory=list)
-    dist_tables_model: List = field(default_factory=list)
     record_mode: int = 0
     record_granularity: int = 10
+    _diffs: List[float] = field(default_factory=list, repr=False)
+    _recorded_epochs: List[int] = field(default_factory=list, repr=False)
+    _model_tables: List = field(default_factory=list, repr=False)
+    _lacam_tables: List = field(default_factory=list, repr=False)
 
     def record(
-        self, epochs: int, dist_tables_model: List, dist_tables_lacam: List | None
+        self,
+        epoch: int,
+        model_tables: List,
+        lacam_tables: List | None,
     ) -> None:
-        """Record distance table stats for the current epoch."""
-        if dist_tables_lacam is not None:
+        """Record dist table data for one epoch."""
+        if lacam_tables is not None:
             diff = float(
                 np.mean(
                     [
-                        np.abs(dt_model - dt_no_model).mean().item()
-                        for dt_model, dt_no_model in zip(
-                            dist_tables_model, dist_tables_lacam
-                        )
+                        np.abs(m - lac).mean()
+                        for m, lac in zip(model_tables, lacam_tables)
                     ]
                 )
             )
-            self.dist_table_differences.append(diff)
+            self._diffs.append(diff)
+        else:
+            self._diffs.append(float("nan"))
 
-        if (epochs - 1) % self.record_granularity != 0:
+        if self.record_mode == 0 or (epoch - 1) % self.record_granularity != 0:
             return
 
+        self._recorded_epochs.append(epoch)
         if self.record_mode == 1:
-            self.dist_tables_model.append(dist_tables_model)
-            self._add_lacam_tables(epochs, dist_tables_lacam)
+            self._model_tables.append(model_tables)
+            self._maybe_add_lacam(epoch, lacam_tables)
         elif self.record_mode == 2:
-            self.dist_tables_model.append([dist_tables_model[0]])
-            self._add_lacam_tables(epochs, dist_tables_lacam, use_one_agent=True)
+            self._model_tables.append([model_tables[0]])
+            self._maybe_add_lacam(epoch, lacam_tables, one_agent=True)
 
-    def _add_lacam_tables(
-        self, epochs: int, dist_tables_lacam: List | None, use_one_agent: bool = False
+    def _maybe_add_lacam(
+        self, epoch: int, lacam_tables: List | None, one_agent: bool = False
     ) -> None:
-        if STORE_LACAM_TABLE_ONLY_ONCE and epochs > 1:
+        if STORE_LACAM_TABLE_ONLY_ONCE and epoch > 1:
             return
-        if dist_tables_lacam is not None:
-            if use_one_agent:
-                self.dist_tables_lacam.append([dist_tables_lacam[0]])
-            else:
-                self.dist_tables_lacam.append(dist_tables_lacam)
+        if lacam_tables is None:
+            return
+        self._lacam_tables.append([lacam_tables[0]] if one_agent else lacam_tables)
 
-    def save(self, output_folder: str) -> None:
-        """Save full distance tables to CSV files."""
+    def latest_diff(self) -> float | None:
+        return self._diffs[-1] if self._diffs else None
 
-        def concat_dist_tables(dist_tables: List[List]) -> np.ndarray:
-            all_tables = []
-            for tables in dist_tables:
-                all_tables.append(np.hstack(tables))
-            return np.vstack(all_tables)
+    def save(self, output_dir: str) -> None:
+        """Write full dist tables to CSV (rows = recorded epochs, cols = flattened H×W × agents)."""
 
-        if self.dist_tables_lacam:
-            arr = concat_dist_tables(self.dist_tables_lacam)
+        def _stack(tables_by_epoch: List) -> np.ndarray:
+            return np.vstack([np.hstack(t) for t in tables_by_epoch])
+
+        if self._lacam_tables:
             np.savetxt(
-                os.path.join(output_folder, consts.DEFAULT_FILENAME_DIST_TABLE_LACAM),
-                arr,
+                os.path.join(output_dir, consts.DEFAULT_FILENAME_DIST_TABLE_LACAM),
+                _stack(self._lacam_tables),
                 delimiter=",",
                 fmt="%.2f",
             )
-
-        if self.dist_tables_model:
-            arr = concat_dist_tables(self.dist_tables_model)
+        if self._model_tables:
             np.savetxt(
-                os.path.join(output_folder, consts.DEFAULT_FILENAME_DIST_TABLE_MODEL),
-                arr,
+                os.path.join(output_dir, consts.DEFAULT_FILENAME_DIST_TABLE_MODEL),
+                _stack(self._model_tables),
                 delimiter=",",
                 fmt="%.2f",
             )
@@ -114,138 +113,182 @@ class DistTableStats:
 
 @dataclass
 class TrainingStats:
-    """Stores training statistics. Compose with optional sub-stats for MAPF and dist table tracking."""
+    """Per-epoch training statistics with structured CSV + JSON storage.
 
-    training_mode: str
-    epochs: int = 0
-    learning: LearningStats = field(default_factory=LearningStats)
-    mapf: MAPFStats | None = None
-    dist_tables: DistTableStats | None = None
+    Storage layout (written by save()):
+        metrics.csv  — epoch, loss, soc[, dist_table_diff]  one row per epoch
+        config.json  — metadata: mode, device, seed, map_size, num_agents
+        dist_tables_model.csv / dist_tables_lacam.csv  — optional, sparse
+        map_mask.csv — optional static grid
+    """
+
+    training_mode: str = ""
     used_device: str | None = None
     used_seed: int | None = None
+    mapf: MAPFStats | None = None
+    dist_tables: DistTableStats | None = None
 
-    @property
-    def used_best_mode(self) -> bool:
-        return self.training_mode == consts.TRAIN_MODE_BEST
+    _epoch_count: int = field(default=0, repr=False)
+    _losses: List[float | None] = field(default_factory=list, repr=False)
 
-    @property
-    def has_dist_table_differences(self) -> bool:
-        return (
-            self.dist_tables is not None
-            and len(self.dist_tables.dist_table_differences) > 0
-        )
-
-    @property
-    def successful_model_epochs(self) -> int:
-        """Count epochs where the model-based solution was better than LaCAM."""
-        if not self.used_best_mode or self.mapf is None:
-            return 0
-        return sum(
-            1
-            for soc_model, soc_no_model in zip(
-                self.mapf.socs_model, self.mapf.socs_no_model
-            )
-            if soc_model is not None
-            and soc_no_model is not None
-            and soc_model < soc_no_model
-        )
+    # ------------------------------------------------------------------ #
+    # Recording                                                            #
+    # ------------------------------------------------------------------ #
 
     def record_epoch(
         self,
-        train_loss: float | None,
+        loss: float | None,
         soc: int | None = None,
-        val_loss: float | None = None,
-        soc_model: int | None = None,
-        soc_no_model: int | None = None,
-        dist_tables_lacam: List | None = None,
-        dist_tables_model: List | None = None,
+        elapsed_time: float | None = None,
     ) -> None:
-        """Record statistics for a training epoch."""
-        self.epochs += 1
-        self.learning.training_loss.append(train_loss)
-        if val_loss is not None:
-            self.learning.validation_loss.append(val_loss)
-
+        """Record scalar metrics for one training epoch."""
+        self._epoch_count += 1
+        self._losses.append(loss)
         if self.mapf is not None:
             self.mapf.socs.append(soc)
-            if self.used_best_mode:
-                self.mapf.socs_model.append(soc_model)
-                self.mapf.socs_no_model.append(soc_no_model)
+            self.mapf.elapsed_times.append(elapsed_time)
 
-        if self.dist_tables is not None and dist_tables_model is not None:
-            self.dist_tables.record(self.epochs, dist_tables_model, dist_tables_lacam)
+    def record_dist_tables(
+        self,
+        model_tables: List,
+        lacam_tables: List | None = None,
+    ) -> None:
+        """Record dist table data for the current epoch. Call after record_epoch."""
+        if self.dist_tables is not None:
+            self.dist_tables.record(self._epoch_count, model_tables, lacam_tables)
 
-    def save(self, output_folder: str, map_mask: np.ndarray | None = None) -> None:
-        """Save statistics and distance tables to files."""
-        self._save_as_json(
-            os.path.join(output_folder, consts.DEFAULT_FILENAME_TRAINING_STATS)
-        )
+    # ------------------------------------------------------------------ #
+    # Properties                                                           #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def has_dist_table_differences(self) -> bool:
+        return self.dist_tables is not None and len(self.dist_tables._diffs) > 0
+
+    # ------------------------------------------------------------------ #
+    # Saving                                                               #
+    # ------------------------------------------------------------------ #
+
+    def save(self, output_dir: str, map_mask: np.ndarray | None = None) -> None:
+        """Write all stats to output_dir."""
+        self._save_metrics_csv(output_dir)
         if self.dist_tables is not None and self.dist_tables.record_mode != 0:
-            self.dist_tables.save(output_folder)
+            self.dist_tables.save(output_dir)
         if map_mask is not None:
             np.savetxt(
-                os.path.join(output_folder, consts.DEFAULT_FILENAME_MAP_MASK),
+                os.path.join(output_dir, consts.DEFAULT_FILENAME_MAP_MASK),
                 map_mask.astype(int),
                 delimiter=",",
                 fmt="%d",
             )
 
-    def _save_as_json(self, filepath: str) -> None:
-        data = self._to_dict()
-        data["version"] = __version__
-        with open(filepath, "w") as f:
-            json.dump(data, f, indent=4)
+    def _save_metrics_csv(self, output_dir: str) -> None:
+        socs: List[int | None] = (
+            self.mapf.socs if self.mapf else [None] * self._epoch_count
+        )
+        elapsed_times: List[float | None] = (
+            self.mapf.elapsed_times if self.mapf else [None] * self._epoch_count
+        )
+        has_diffs = (
+            self.dist_tables is not None
+            and len(self.dist_tables._diffs) == self._epoch_count
+        )
+        has_elapsed = len(elapsed_times) == self._epoch_count
+        fieldnames = ["epoch", "loss", "soc"]
+        if has_elapsed:
+            fieldnames.append("elapsed_time_ms")
+        if has_diffs:
+            fieldnames.append("dist_table_diff")
 
-    def _to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "training_mode": self.training_mode,
-            "used_device": self.used_device,
-            "used_seed": self.used_seed,
-            "epochs": self.epochs,
-            "training_loss": self.learning.training_loss,
-            "validation_loss": self.learning.validation_loss,
-        }
-        if self.mapf is not None:
-            d["map_size"] = self.mapf.map_size
-            d["num_agents"] = self.mapf.num_agents
-            d["socs"] = self.mapf.socs
-            d["socs_model"] = self.mapf.socs_model
-            d["socs_no_model"] = self.mapf.socs_no_model
-        if self.dist_tables is not None:
-            d["dist_table_differences"] = self.dist_tables.dist_table_differences
-        return d
+        with open(os.path.join(output_dir, _FILENAME_METRICS), "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(self._epoch_count):
+                row: dict[str, Any] = {
+                    "epoch": i + 1,
+                    "loss": self._losses[i],
+                    "soc": socs[i] if i < len(socs) else None,
+                }
+                if has_elapsed:
+                    row["elapsed_time_ms"] = elapsed_times[i]
+                if has_diffs:
+                    row["dist_table_diff"] = self.dist_tables._diffs[i]  # type: ignore[union-attr]
+                writer.writerow(row)
+
+    # ------------------------------------------------------------------ #
+    # Loading                                                              #
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def load(cls, output_dir: str) -> TrainingStats:
+        """Load stats from a directory written by save()."""
+        config_path = os.path.join(output_dir, _FILENAME_CONFIG)
+        config: dict = {}
+        if os.path.isfile(config_path):
+            with open(config_path) as f:
+                config = json.load(f)
+        else:
+            used_config_path = os.path.join(output_dir, "used_config.json")
+            if os.path.isfile(used_config_path):
+                with open(used_config_path) as f:
+                    config = json.load(f)
+
+        mapf = None
+        if "num_agents" in config:
+            mapf = MAPFStats(
+                num_agents=config.get("num_agents"),
+                map_size=tuple(config["map_size"]) if config.get("map_size") else None,
+            )
+
+        stats = cls(
+            training_mode=config.get("training_mode", ""),
+            used_device=config.get("used_device"),
+            used_seed=config.get("used_seed"),
+            mapf=mapf,
+        )
+
+        with open(os.path.join(output_dir, _FILENAME_METRICS), newline="") as f:
+            for row in csv.DictReader(f):
+                loss_str = row["loss"]
+                loss = float(loss_str) if loss_str not in ("", "None") else None
+                soc_str = row.get("soc", "")
+                soc = int(float(soc_str)) if soc_str not in ("", "None") else None
+                elapsed_str = row.get("elapsed_time_ms", "")
+                elapsed = (
+                    float(elapsed_str) if elapsed_str not in ("", "None") else None
+                )
+                stats._epoch_count += 1
+                stats._losses.append(loss)
+                if stats.mapf is not None:
+                    stats.mapf.socs.append(soc)
+                    stats.mapf.elapsed_times.append(elapsed)
+
+        return stats
 
     @classmethod
     def load_from_json(cls, filepath: str) -> TrainingStats:
-        """Load statistics from a JSON file."""
-        with open(filepath, "r") as f:
+        """Load stats from the legacy single-JSON format."""
+        with open(filepath) as f:
             data = json.load(f)
 
         mapf = None
         if "socs" in data:
             mapf = MAPFStats(
                 socs=data["socs"],
-                socs_model=data.get("socs_model", []),
-                socs_no_model=data.get("socs_no_model", []),
                 map_size=tuple(data["map_size"]) if data.get("map_size") else None,
                 num_agents=data.get("num_agents"),
             )
 
-        dist_tables = None
-        if "dist_table_differences" in data:
-            dist_tables = DistTableStats(
-                dist_table_differences=data["dist_table_differences"],
-            )
+        losses = data.get("training_loss", data.get("losses", []))
+        if not isinstance(losses, list):
+            losses = []
 
-        return cls(
-            training_mode=data["training_mode"],
-            epochs=data["epochs"],
-            learning=LearningStats(
-                training_loss=data["training_loss"],
-                validation_loss=data.get("validation_loss", []),
-            ),
-            mapf=mapf,
-            dist_tables=dist_tables,
+        stats = cls(
+            training_mode=data.get("training_mode", ""),
             used_device=data.get("used_device"),
             used_seed=data.get("used_seed"),
+            mapf=mapf,
         )
+        stats._epoch_count = data.get("epochs", len(losses))
+        stats._losses = losses
+        return stats

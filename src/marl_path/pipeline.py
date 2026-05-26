@@ -9,7 +9,11 @@ from .model import (
     pretrain_on_default_value,
     TrainingStats,
     MAPFStats,
+    BasicExtractor,
+    FeatureExtractor,
+    OtherAgentsChannelExtractor,
 )
+from .model.inference import save_checkpoint
 from marl_path.shared.mapf_utils import get_grid, get_scenario, validate_mapf_solution
 from .pycam import LaCAM
 import torch
@@ -25,7 +29,7 @@ SEED_MAX = 2**32 - 1
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
-    if args.output_dir is not None:
+    if args.output_dir is not None and args.record_mode != 0:
         os.makedirs(args.output_dir, exist_ok=True)
         log_path = Path(args.output_dir) / "logs_{time:YYYY-MM-DD_HH-mm-ss}.log"
         logger.add(
@@ -81,12 +85,13 @@ class VDNPipeline(DefaultPipeline):
     def __init__(self, args: argparse.Namespace):
         super().__init__(args)
         self.device: torch.device = _get_device(self.args.device)
-        self.model = _initialize_model(
+        self.model, self.extractor = _initialize_model(
             self.args.model_file,
             self.device,
             model_initialization_mode=self.args.model_initialization_mode,
             grid=self.grid,
             seed=getattr(self.args, "seed_training", None),
+            extractor_type=self.args.feature_extractor_type,
         )
         self.training_stats = TrainingStats(
             training_mode=self.args.pipeline_mode,
@@ -122,11 +127,15 @@ class VDNPipeline(DefaultPipeline):
                 goals=self.goals,
                 model=self.model,
                 device=self.device,
+                extractor=self.extractor,
                 seed=seed,
                 time_limit_ms=self.args.time_limit_ms,
                 flg_star=self.args.flg_star,
                 verbose=self.args.verbose,
             )
+
+            elapsed_time = planner.deadline.elapsed
+
             if len(solution) != 0:
                 validate_mapf_solution(self.grid, self.starts, self.goals, solution)
                 soc = get_soc(solution)
@@ -148,9 +157,10 @@ class VDNPipeline(DefaultPipeline):
                 self.goals,
                 self.grid,
                 device=self.device,
+                extractor=self.extractor,
             )
 
-            self.training_stats.record_epoch(mean_loss, soc)
+            self.training_stats.record_epoch(mean_loss, soc, elapsed_time)
 
             logger.info(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")
 
@@ -163,9 +173,9 @@ class VDNPipeline(DefaultPipeline):
             model_path = os.path.join(
                 self.args.output_dir, consts.DEFAULT_FILENAME_TRAINED_MODEL
             )
-            torch.save(self.model.state_dict(), model_path)
+            save_checkpoint(self.model, self.extractor, model_path)
             # Training stats saving
-            map_mask = get_grid(self.args.map_file) if self.args.save_map_mask else None
+            map_mask = get_grid(self.args.map_file)
             self.training_stats.save(self.args.output_dir, map_mask=map_mask)
             # Arguments saving
             args_path = os.path.join(
@@ -188,7 +198,8 @@ def _initialize_model(
     model_initialization_mode: int = 0,
     grid=None,
     seed: int | None = None,
-) -> DistanceTableCNN:
+    extractor_type: str = consts.EXTRACTOR_BASIC,
+) -> tuple[DefaultModel, FeatureExtractor]:
     if path is not None:
         return load_model(path, device=device)
 
@@ -198,15 +209,25 @@ def _initialize_model(
             torch.cuda.manual_seed_all(seed)
         np.random.seed(seed)
 
-    model = DistanceTableCNN().to(device)
+    if extractor_type == consts.EXTRACTOR_OTHER_AGENTS_CHANNEL:
+        extractor = OtherAgentsChannelExtractor()
+    else:
+        extractor = BasicExtractor()
+
+    model = DistanceTableCNN(in_channels=extractor.n_channels).to(device)
     if model_initialization_mode == 1:
         logger.info("applying pretraining on default values...")
         pretrain_optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         pretrain_on_default_value(
-            model, grid, pretrain_optimizer, num_epochs=1000, device=device
+            model,
+            grid,
+            pretrain_optimizer,
+            num_epochs=1000,
+            device=device,
+            extractor=extractor,
         )
         logger.info("pretraining completed.")
-    return model
+    return model, extractor
 
 
 def _run_lacam_only(args: argparse.Namespace) -> None:
@@ -260,15 +281,9 @@ def _get_device(device_str: str) -> torch.device:
 
 def _record_empty_epoch(
     training_stats: TrainingStats,
-    dist_tables_lacam: list | None = None,
     dist_tables_model: list | None = None,
 ) -> None:
     logger.info("No solution found this epoch.")
-    training_stats.record_epoch(
-        train_loss=None,
-        soc=None,
-        soc_model=None,
-        soc_no_model=None,
-        dist_tables_lacam=dist_tables_lacam,
-        dist_tables_model=dist_tables_model,
-    )
+    training_stats.record_epoch(loss=None, soc=None)
+    if dist_tables_model is not None:
+        training_stats.record_dist_tables(model_tables=dist_tables_model)

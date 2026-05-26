@@ -20,6 +20,7 @@ from marl_path.shared.mapf_utils import (
 from .pibt import PIBT
 
 from marl_path.model.definition import DefaultModel
+from marl_path.model.feature_extraction import FeatureExtractor
 
 
 @dataclass
@@ -67,6 +68,7 @@ class LaCAM:
         goals: Config,
         model: Optional[DefaultModel] = None,
         device: torch.device | None = None,
+        extractor: Optional[FeatureExtractor] = None,
         time_limit_ms: int = 3000,
         deadline: Deadline | None = None,
         flg_star: bool = True,
@@ -80,6 +82,7 @@ class LaCAM:
         self.goals: Config = goals
         self.model: Optional[DefaultModel] = model
         self.device: torch.device | None = device
+        self.extractor: Optional[FeatureExtractor] = extractor
         self.deadline: Deadline = (
             deadline if deadline is not None else Deadline(time_limit_ms)
         )
@@ -93,9 +96,10 @@ class LaCAM:
         self.info(1, "start solving MAPF")
 
         # set distance tables
-        self.dist_tables = [
-            DistTable(self.grid, g, model=self.model, device=self.device) for g in self.goals
-        ]
+        self.dist_tables: list[DistTable] = []
+        for g in self.goals:
+            other_agents = [gg for gg in self.goals if gg != g]
+            self.dist_tables.append(DistTable(self.grid, g, model=self.model, device=self.device, extractor=self.extractor, other_agents=other_agents))
         self.pibt = PIBT(self.dist_tables)
 
         # set search scheme

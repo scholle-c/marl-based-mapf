@@ -9,7 +9,7 @@ flg_star        = false
 pipeline_mode   = "vdn"
 
 # RL training settings
-epochs          = 101
+epochs          = 5
 lr              = 1e-3
 device          = "auto"
 output_dir      = "./output/default_output"

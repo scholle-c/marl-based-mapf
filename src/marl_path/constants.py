@@ -17,3 +17,7 @@ DEFAULT_FILENAME_AGENT_PATHS: str = "agent_paths.json"
 COMPARISON_ALGO_NONE: str = "none"
 COMPARISON_ALGO_LACAM: str = "lacam"
 COMPARISON_ALGO_IMITATION_MODEL: str = "imitation_model"
+
+# Extractor types
+EXTRACTOR_BASIC: str = "basic"
+EXTRACTOR_OTHER_AGENTS_CHANNEL: str = "other_agents_channel"

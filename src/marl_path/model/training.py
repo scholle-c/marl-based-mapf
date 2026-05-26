@@ -6,10 +6,9 @@ from __future__ import annotations
 from typing import Any, List
 import torch
 import numpy as np
-from itertools import groupby
 
-from .utils import build_input_tensor, build_random_input_tensor
 from marl_path.shared import Coord
+from .feature_extraction import FeatureExtractor, BasicExtractor
 
 
 def train_vdn_on_solution(
@@ -20,72 +19,82 @@ def train_vdn_on_solution(
     goals: Any,
     map: Any,
     device: torch.device,
+    extractor: FeatureExtractor,
 ) -> float:
     model.train()
     optimizer.zero_grad()
 
     num_agents = len(starts)
 
-    values: List[torch.Tensor] = []
-    targets: List[torch.Tensor] = []
+    target_q_tot: torch.Tensor = torch.zeros(
+        len(solution), dtype=torch.float32, device=device
+    )
+    values_q_tot = None
 
+    # TODO: Maybe this can be parallized or done using np methods on solution?
     for agent_idx in range(num_agents):
         path = [solution[t][agent_idx] for t in range(len(solution))]
+        other_agent_goals = [goals[i] for i in range(num_agents) if i != agent_idx]
         dist_table = (
             model(
-                build_input_tensor(map, goals[agent_idx], starts[agent_idx]).to(device)
+                extractor.extract(
+                    map,
+                    goals[agent_idx],
+                    starts[agent_idx],
+                    other_agent_goals,
+                    device=device,
+                )
             )
             .squeeze(0)
             .squeeze(0)
         )
-        path = _remove_waiting_from_path(path)
-        coord2targets: dict[Coord, int] = _get_targets_for_path(path)
 
-        agent_targets = torch.tensor(
-            list(coord2targets.values()), dtype=torch.float32, device=device
-        )
-        agent_values = _get_via_coordinates(dist_table, list(coord2targets.keys()))
+        agent_values = _get_via_coordinates(dist_table, path)
+        agent_targets = _get_path_target(path)
 
-        values.extend(agent_values)
-        targets.extend(agent_targets)
+        target_q_tot += torch.tensor(agent_targets, dtype=torch.float32, device=device)
+        if values_q_tot is None:
+            values_q_tot = agent_values
+        else:
+            values_q_tot += agent_values
 
-    values_tensor = torch.stack(values)
-    targets_tensor = torch.stack(targets)
-
-    loss = torch.nn.functional.mse_loss(values_tensor, targets_tensor, reduction="mean")
+    assert values_q_tot is not None
+    loss = torch.nn.functional.mse_loss(values_q_tot, target_q_tot, reduction="mean")
     loss.backward()
     optimizer.step()
     return loss.item()
 
 
-def _remove_waiting_from_path(path: List[Coord]) -> List[Coord]:
-    return [coord for coord, _ in groupby(path)]
-
-
-def _get_targets_for_path(path: List[Coord]) -> dict[Coord, int]:
-    """Gets the target values for each coordinate in the path. The target value
-    for a coordinate is the number of steps until the agent reaches the goal
-    from that coordinate, according to the path. If a coordinate appears multiple
-    times in the path, the smallest target value is used.
+def _get_path_target(path: Any) -> List[int]:
+    """
+    Determines the distance values for a given path of length > 0, where the agent
+    has reached its goal. Works like this:
+    1.) Iterate from goal to start, start with trgt = 0
+    2.) When the agent moved, add trgt++ to list of targets
+    3.) When the agent waited, add trgt to list of targets
 
     Args:
-        path (List[Coord]): The path of the agent, as a list of coordinates.
+        path (Any): Path of the agent. len(path) must be greater than zero.
 
     Returns:
-        dict[Coord, int]: A dictionary mapping each coordinate in the path to its target value.
+        List[int]: A list with distance-target values
     """
-    targets = list(range(len(path) - 1, -1, -1))
-    coord2targets = dict()
-    updated_coords = set()
+    targets = [0]
+    trgt: int = 0
+    coord_prev = path[-1]
+    goal = path[-1]
+    for coord in reversed(path[:-1]):
+        if coord != coord_prev:
+            trgt += 1
 
-    # Check for each coordinate what the smallest target value is (for multiple visits) and assign it to the coordinate
-    for coord, target in zip(path, targets):
-        if coord not in coord2targets:
-            coord2targets[coord] = target
+        if coord == goal:
+            targets.append(0)
         else:
-            updated_coords.add(coord)
-            coord2targets[coord] = min(coord2targets[coord], target)
-    return coord2targets
+            targets.append(trgt)
+
+        coord_prev = coord
+    targets.reverse()
+    return targets
 
 
 def _get_via_coordinates(arr: Any, coords: List[Coord]) -> Any:
@@ -115,6 +124,7 @@ def pretrain_on_default_value(
     default_value: int | None = None,
     num_epochs: int = 10,
     device: torch.device | None = None,
+    extractor: FeatureExtractor | None = None,
 ) -> None:
     """
     Trains the distance-table model, to predict a default value
@@ -125,8 +135,10 @@ def pretrain_on_default_value(
         grid (Grid): The map that the model should be trained on
         default_value (float, optional): The default value that should be predicted. Default is the map size.
         num_epochs (int, optional): How many epochs should be used for training. Defaults to 10.
+        extractor: Feature extractor to use. Defaults to BasicExtractor.
     """
-
+    if extractor is None:
+        extractor = BasicExtractor()
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     fill_value: int = (
@@ -137,10 +149,19 @@ def pretrain_on_default_value(
         size=grid.shape, fill_value=fill_value, dtype=torch.float32, device=device
     )
 
+    accessible = np.argwhere(grid)
     model.train()
     for _ in range(num_epochs):
         optimizer.zero_grad()
-        random_input: torch.Tensor = build_random_input_tensor(grid, device=device)
+        idx = np.random.choice(len(accessible), size=2, replace=False)
+        goal: tuple[int, int] = (int(accessible[idx[0], 0]), int(accessible[idx[0], 1]))
+        start: tuple[int, int] = (
+            int(accessible[idx[1], 0]),
+            int(accessible[idx[1], 1]),
+        )
+        random_input: torch.Tensor = extractor.extract(
+            grid, goal, start, [], device=device
+        )
         value_tensor = model(random_input).squeeze(0).squeeze(0)
         mean_loss = torch.nn.functional.mse_loss(value_tensor, target_tensor)
         mean_loss.backward()

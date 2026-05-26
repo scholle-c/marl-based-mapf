@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 from marl_path.shared.config import load_config
 from .pipeline import run_pipeline
+from . import constants as consts
 
 
 def main():
@@ -54,7 +55,14 @@ def main():
         "--pipeline-mode",
         type=str,
         default="vdn",
-        help="Choose between: 'vdn': train the heuristic model using VDN loss",
+        help="Choose between: 'vdn': train the heuristic model using VDN loss. 'lacam-only': run LaCAM once without any rl training or using a distance table CNN model.",
+    )
+
+    parser.add_argument(
+        "--feature-extractor-type",
+        type=str,
+        default=consts.EXTRACTOR_BASIC,
+        help=f"type of feature extractor to use for the heuristic model. Choose between: {consts.EXTRACTOR_BASIC}: 3 channels (map, goal, start), {consts.EXTRACTOR_OTHER_AGENTS_CHANNEL}: basic + one binary channel marking all other agent positions",
     )
 
     parser.add_argument(
@@ -110,22 +118,52 @@ def main():
     parser.add_argument(
         "--record-mode",
         type=int,
-        default=0,
+        default=1,
         help="mode for recording training process. 0: no recording",
     )
 
     parser.add_argument(
-        "--comparison-algorithm",
-        type=str,
-        default="none",
-        help="algorithm for comparison during training. 'none': no comparison, 'lacam': compare with LaCAM, 'model': compare with pretrained model without rl improvements.",
+        "--record-num-agents",
+        type=int,
+        default=0,
+        help="number of agents to record during training. 0: record all agents",
     )
 
-    args = parser.parse_args()
-    if args.config_file is not None:
-        config = load_config(args.config_file)
-        args.__dict__.update(config)
+    parser.add_argument(
+        "--record-paths",
+        type=bool,
+        default=False,
+        help="whether to record the paths of agents during training. 0: do not record, 1: record paths",
+    )
 
+    parser.add_argument(
+        "--record-heuristics",
+        type=bool,
+        default=False,
+        help="whether to record the heuristics of agents during training. 0: do not record, 1: record heuristics",
+    )
+
+    parser.add_argument(
+        "--record-episode-interval",
+        type=int,
+        default=100,
+        help="interval (in episodes) at which to record training metrics and results.",
+    )
+
+    parser.add_argument(
+        "--record-logs",
+        type=bool,
+        default=True,
+        help="whether to record the logs of training. 0: do not record, 1: record logs",
+    )
+
+    # Load config as defaults so explicit CLI args can still override them.
+    first_pass, _ = parser.parse_known_args()
+    if first_pass.config_file is not None:
+        config = load_config(first_pass.config_file)
+        parser.set_defaults(**config)
+
+    args = parser.parse_args()
     run_pipeline(args)
 
 

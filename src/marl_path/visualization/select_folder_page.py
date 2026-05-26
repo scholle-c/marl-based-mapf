@@ -84,7 +84,8 @@ st.markdown("The following folders with training statistics have been found:")
 training_dirs = [
     p
     for p in settings.cwd.iterdir()
-    if p.is_dir() and (p / "training_stats.json").is_file()
+    if p.is_dir()
+    and ((p / "training_stats.json").is_file() or (p / "metrics.csv").is_file())
 ]
 training_dirs.sort(key=lambda p: p.name.lower())
 

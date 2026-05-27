@@ -69,6 +69,22 @@ To run every `.toml` file in a folder, five times each:
 scripts\benchmark.bat configs\my_benchmark_folder
 ```
 
+To submit a job for a slurm-cluster:
+
+```console
+# submit to partition GPU
+sbatch -p GPU scripts/sbatch_benchmark.sh
+
+# check queue
+squeue -u $USER
+
+# if you get a job id (e.g. 12345), inspect accounting (if enabled)
+sacct -j 12345 --format=JobID,State,ExitCode,MaxRSS,Elapsed
+
+# follow output
+tail -f logs/bench_12345.out
+```
+
 ## Arguments for Configuration or the CLI
 
 Arguments can be provided on the CLI or inside a TOML config file. CLI flags always take precedence over the config file.

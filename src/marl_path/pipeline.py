@@ -39,11 +39,13 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     logger.info("MARL-path pipeline started with arguments: {}", args)
     logger.info("starting MARL-path pipeline in mode: {}", args.pipeline_mode)
-    if args.pipeline_mode == consts.TRAIN_MODE_LACAM_ONLY:
-        _run_lacam_only(args)
-        return
+    if args.pipeline_mode == consts.PIPELINE_MODE_LACAM_ONLY:
+        pipeline = ComparisonPipeline(args)
+    elif args.pipeline_mode == consts.PIPELINE_MODE_EXPERT_PRETRAIN:
+        pipeline = ExpertAlgorithmPretrainingPipeline(args)
+    else:
+        pipeline = VDNPipeline(args)
 
-    pipeline = VDNPipeline(args)
     pipeline.run_model_training()
     pipeline.store_results()
 
@@ -77,9 +79,11 @@ class DefaultPipeline(ABC):
         pass
 
 
-class VDNPipeline(DefaultPipeline):
+class DefaultTrainingPipeline(DefaultPipeline):
     """
-    Implementation of the training pipeline using a Value Decomposition Network (VDN) approach for training a distance table CNN model based on LaCAM solutions.
+    A default implementation of the training pipeline that can be used as a base for specific training approaches.
+
+    This class provides a structure for loading the MAPF instance, initializing the model, and defining the interface for running the training loop and storing results. Subclasses can override the run_model_training and store_results methods to implement specific training logic and result handling.
     """
 
     def __init__(self, args: argparse.Namespace):
@@ -101,6 +105,192 @@ class VDNPipeline(DefaultPipeline):
         )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr)
         self.random_seed_gen = random.Random(self.args.seed)
+
+    def store_results(self) -> None:
+        if self.args.record_mode != 0:
+            os.makedirs(self.args.output_dir, exist_ok=True)
+            # Model saving
+            model_path = os.path.join(
+                self.args.output_dir, consts.DEFAULT_FILENAME_TRAINED_MODEL
+            )
+            save_checkpoint(self.model, self.extractor, model_path)
+            # Training stats saving
+            map_mask = get_grid(self.args.map_file)
+            self.training_stats.save(self.args.output_dir, map_mask=map_mask)
+            # Arguments saving
+            args_path = os.path.join(
+                self.args.output_dir, consts.DEFAULT_FILENAME_USED_CONFIG
+            )
+            data = {
+                k: (str(v) if hasattr(v, "__fspath__") else v)
+                for k, v in vars(self.args).items()
+            }
+            with open(args_path, "w") as f:
+                json.dump(data, f, indent=4)
+            logger.info(
+                "Saved trained model and training stats to {}", self.args.output_dir
+            )
+
+
+class ComparisonPipeline(DefaultTrainingPipeline):
+    """
+    A pipeline that runs an algorithm (e.g., LaCAM) without any training to obtain
+    results to compare with a trained model.
+    """
+
+    def __init__(self, args: argparse.Namespace):
+        super().__init__(args)
+        self.USE_LACAM = True
+
+    def run_model_training(self) -> None:
+        logger.info(
+            "starting training loop with parameters: epochs={}, lr={}, device={}, seed={}",
+            self.args.epochs,
+            self.args.lr,
+            self.device.type,
+            self.args.seed,
+        )
+
+        # Start training loop
+        for epoch in range(self.args.epochs):
+            logger.info(f"\n====== Epoch {epoch + 1}/{self.args.epochs} ======")
+            solution = None
+            soc = None
+            seed = self.random_seed_gen.randint(0, SEED_MAX)
+
+            # Check the SOC for the algorithm's solution and record training stats
+            planner = LaCAM()
+            solution = planner.solve(
+                grid=self.grid,
+                starts=self.starts,
+                goals=self.goals,
+                seed=seed,
+                time_limit_ms=self.args.time_limit_ms,
+                flg_star=self.args.flg_star,
+                verbose=self.args.verbose,
+            )
+            elapsed_time_model = planner.deadline.elapsed
+
+            if len(solution) != 0:
+                soc = get_soc(solution)
+                validate_mapf_solution(self.grid, self.starts, self.goals, solution)
+                self.training_stats.record_epoch(None, soc, elapsed_time_model)
+            else:
+                dist_tables_model = [dt.table for dt in planner.dist_tables]
+                _record_empty_epoch(
+                    self.training_stats,
+                    dist_tables_model=dist_tables_model,
+                )
+                logger.info("No model solution found this epoch.")
+
+            logger.info(f" SOC: {soc}")
+
+        logger.info("Training completed after {} epochs.", self.args.epochs)
+
+
+class ExpertAlgorithmPretrainingPipeline(DefaultTrainingPipeline):
+    """
+    Implementation of the training pipeline using an expert algorithm (e.g., LaCAM) to generate training data for pretraining a distance table CNN model.
+
+    This pipeline runs the expert algorithm on the given MAPF instance to obtain solutions and corresponding distance tables, which are then used to pretrain the model before any reinforcement learning training.
+    """
+
+    def __init__(self, args: argparse.Namespace):
+        super().__init__(args)
+
+    def run_model_training(self) -> None:
+        logger.info(
+            "starting training loop with parameters: epochs={}, lr={}, device={}, seed={}",
+            self.args.epochs,
+            self.args.lr,
+            self.device.type,
+            self.args.seed,
+        )
+
+        # Start training loop
+        for epoch in range(self.args.epochs):
+            logger.info(f"\n====== Epoch {epoch + 1}/{self.args.epochs} ======")
+            solution = None
+            soc_model = None
+            soc_expert = None
+            seed = self.random_seed_gen.randint(0, SEED_MAX)
+
+            # solve MAPF using expert algorithm (LaCAM) to generate training data
+            planner = LaCAM()
+
+            solution = planner.solve(
+                grid=self.grid,
+                starts=self.starts,
+                goals=self.goals,
+                seed=seed,
+                time_limit_ms=self.args.time_limit_ms,
+                flg_star=self.args.flg_star,
+                verbose=self.args.verbose,
+            )
+
+            if len(solution) != 0:
+                soc_expert = get_soc(solution)
+                validate_mapf_solution(self.grid, self.starts, self.goals, solution)
+            else:
+                logger.info("No expert solution found this epoch.")
+                continue
+
+            # train model
+            mean_loss = train_vdn_on_solution(
+                self.model,
+                self.optimizer,
+                solution,
+                self.starts,
+                self.goals,
+                self.grid,
+                device=self.device,
+                extractor=self.extractor,
+            )
+
+            # Check the SOC for the model's solution (after training) and record training stats
+            planner = LaCAM()
+            solution = planner.solve(
+                grid=self.grid,
+                starts=self.starts,
+                goals=self.goals,
+                model=self.model,
+                device=self.device,
+                extractor=self.extractor,
+                seed=seed,
+                time_limit_ms=self.args.time_limit_ms,
+                flg_star=self.args.flg_star,
+                verbose=self.args.verbose,
+            )
+            elapsed_time_model = planner.deadline.elapsed
+
+            if len(solution) != 0:
+                soc_model = get_soc(solution)
+                validate_mapf_solution(self.grid, self.starts, self.goals, solution)
+                self.training_stats.record_epoch(
+                    mean_loss, soc_model, elapsed_time_model
+                )
+            else:
+                dist_tables_model = [dt.table for dt in planner.dist_tables]
+                _record_empty_epoch(
+                    self.training_stats,
+                    dist_tables_model=dist_tables_model,
+                )
+                logger.info("No model solution found this epoch.")
+
+            logger.info(
+                f"  SOC (Model): {soc_model}, SOC (Expert): {soc_expert}, Mean Loss: {mean_loss:.4f}"
+            )
+
+        logger.info("Training completed after {} epochs.", self.args.epochs)
+
+
+class VDNPipeline(DefaultTrainingPipeline):
+    """
+    Implementation of the training pipeline using a Value Decomposition Network (VDN) approach for training a distance table CNN model based on LaCAM solutions.
+    """
+
+    def __init__(self, args: argparse.Namespace):
+        super().__init__(args)
 
     def run_model_training(self) -> None:
         logger.info(
@@ -166,31 +356,6 @@ class VDNPipeline(DefaultPipeline):
 
         logger.info("Training completed after {} epochs.", self.args.epochs)
 
-    def store_results(self) -> None:
-        if self.args.record_mode != 0:
-            os.makedirs(self.args.output_dir, exist_ok=True)
-            # Model saving
-            model_path = os.path.join(
-                self.args.output_dir, consts.DEFAULT_FILENAME_TRAINED_MODEL
-            )
-            save_checkpoint(self.model, self.extractor, model_path)
-            # Training stats saving
-            map_mask = get_grid(self.args.map_file)
-            self.training_stats.save(self.args.output_dir, map_mask=map_mask)
-            # Arguments saving
-            args_path = os.path.join(
-                self.args.output_dir, consts.DEFAULT_FILENAME_USED_CONFIG
-            )
-            data = {
-                k: (str(v) if hasattr(v, "__fspath__") else v)
-                for k, v in vars(self.args).items()
-            }
-            with open(args_path, "w") as f:
-                json.dump(data, f, indent=4)
-            logger.info(
-                "Saved trained model and training stats to {}", self.args.output_dir
-            )
-
 
 def _initialize_model(
     path: str | None,
@@ -228,33 +393,6 @@ def _initialize_model(
         )
         logger.info("pretraining completed.")
     return model, extractor
-
-
-def _run_lacam_only(args: argparse.Namespace) -> None:
-    """
-    Run LaCAM once without any rl training or using a distance table CNN model.
-
-    Args:
-        args (argparse.Namespace): Parsed command-line arguments.
-    """
-    # define problem instance
-    grid = get_grid(args.map_file)
-    starts, goals = get_scenario(args.scen_file, args.num_agents)
-
-    planner = LaCAM()
-    solution = planner.solve(
-        grid=grid,
-        starts=starts,
-        goals=goals,
-        model=None,
-        seed=args.seed,
-        time_limit_ms=args.time_limit_ms,
-        flg_star=args.flg_star,
-        verbose=args.verbose,
-    )
-    validate_mapf_solution(grid, starts, goals, solution)
-    soc = get_soc(solution)
-    print(f"LaCAM only SOC: {soc}")
 
 
 def _get_device(device_str: str) -> torch.device:

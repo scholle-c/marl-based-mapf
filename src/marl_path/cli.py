@@ -34,30 +34,35 @@ def main():
         type=Path,
         default=_dev_path("assets", "tunnel.map"),
     )
+
     parser.add_argument(
         "-i",
         "--scen-file",
         type=Path,
         default=_dev_path("assets", "tunnel.scen"),
     )
+
     parser.add_argument(
         "-N",
         "--num-agents",
         type=int,
         default=4,
     )
+
     parser.add_argument(
         "-v",
         "--verbose",
         type=int,
         default=1,
     )
+
     parser.add_argument(
         "--flg-star",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="choose LaCAM* (default) or vanilla LaCAM",
     )
+
     parser.add_argument("-s", "--seed", type=int, default=0)
 
     parser.add_argument("-t", "--time-limit-ms", type=int, default=1000)
@@ -67,7 +72,7 @@ def main():
         "--pipeline-mode",
         type=str,
         default="vdn",
-        help="Choose between: 'vdn': train the heuristic model using VDN loss. 'lacam-only': run LaCAM once without any rl training or using a distance table CNN model.",
+        help=f"Choose between: '{consts.PIPELINE_MODE_VDN}': train the heuristic model using VDN loss. '{consts.PIPELINE_MODE_EXPERT_PRETRAIN}': pretrain the heuristic model using solutions from an expert algorithm. '{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM once without any rl training or using a distance table CNN model.",
     )
 
     parser.add_argument(

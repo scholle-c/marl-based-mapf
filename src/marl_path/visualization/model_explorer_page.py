@@ -16,7 +16,8 @@ from marl_path.shared.mapf_utils import get_grid, get_scenario, is_valid_coord
 def _prefill_model_path() -> str:
     if settings.selected_folders:
         return str(
-            Path(str(settings.selected_folders[0])) / consts.DEFAULT_FILENAME_TRAINED_MODEL
+            Path(str(settings.selected_folders[0]))
+            / consts.DEFAULT_FILENAME_TRAINED_MODEL
         )
     return ""
 
@@ -80,7 +81,12 @@ def _make_map_preview(
                 x=[p[1] for p in other_positions],
                 y=[p[0] for p in other_positions],
                 mode="markers",
-                marker=dict(symbol="square", size=10, color="orange", line=dict(width=1, color="white")),
+                marker=dict(
+                    symbol="square",
+                    size=10,
+                    color="orange",
+                    line=dict(width=1, color="white"),
+                ),
                 name="Other agents",
             )
         )
@@ -118,7 +124,9 @@ def _make_map_preview(
     )
     cell_px = max(12, min(24, 600 // max(H, W)))
     fig.update_layout(
-        yaxis=dict(autorange="reversed", scaleanchor="x", constrain="domain", title="Row"),
+        yaxis=dict(
+            autorange="reversed", scaleanchor="x", constrain="domain", title="Row"
+        ),
         xaxis=dict(constrain="domain", title="Col"),
         height=H * cell_px + 100,
         margin=dict(l=50, r=50, t=10, b=50),
@@ -160,7 +168,9 @@ def _make_heatmap(
             x=[goal[1]],
             y=[goal[0]],
             mode="markers+text",
-            marker=dict(symbol="star", size=16, color="red", line=dict(width=1, color="white")),
+            marker=dict(
+                symbol="star", size=16, color="red", line=dict(width=1, color="white")
+            ),
             text=["Goal"],
             textposition="top center",
             name="Goal",
@@ -172,7 +182,10 @@ def _make_heatmap(
             y=[start[0]],
             mode="markers+text",
             marker=dict(
-                symbol="circle", size=14, color="#00ff88", line=dict(width=1, color="white")
+                symbol="circle",
+                size=14,
+                color="#00ff88",
+                line=dict(width=1, color="white"),
             ),
             text=["Start"],
             textposition="top center",
@@ -182,7 +195,9 @@ def _make_heatmap(
     H, W = grid.shape
     cell_px = max(12, min(24, 600 // max(H, W)))
     fig.update_layout(
-        yaxis=dict(autorange="reversed", scaleanchor="x", constrain="domain", title="Row"),
+        yaxis=dict(
+            autorange="reversed", scaleanchor="x", constrain="domain", title="Row"
+        ),
         xaxis=dict(constrain="domain", title="Col"),
         height=H * cell_px + 100,
         margin=dict(l=50, r=50, t=30, b=50),
@@ -224,7 +239,9 @@ with st.expander("1  File paths", expanded="expl_grid" not in st.session_state):
         key="expl_scen_path",
         placeholder="/path/to/scenario.scen",
     )
-    load_btn = st.button("Load files", disabled=not (model_path.strip() and map_path.strip()))
+    load_btn = st.button(
+        "Load files", disabled=not (model_path.strip() and map_path.strip())
+    )
 
 if load_btn:
     errors: list[str] = []
@@ -313,7 +330,9 @@ if grid is not None and model is not None:
 
     if predict_btn:
         with st.spinner("Running model..."):
-            pred = predict_distance_table(model, grid, start, goal, extractor, other_positions)
+            pred = predict_distance_table(
+                model, grid, start, goal, extractor, other_positions
+            )
             st.session_state["expl_prediction"] = pred
             st.session_state["expl_query"] = (start, goal)
 

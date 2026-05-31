@@ -34,6 +34,23 @@ def _fmt(key: str, val: Any) -> str:
     return str(val)
 
 
+def _configs_to_markdown(configs: List[Dict]) -> str:
+    if len(configs) == 1:
+        cfg = configs[0]
+        lines = ["| Parameter | Value |", "|-----------|-------|"]
+        for key, label in _CONFIG_FIELDS:
+            lines.append(f"| {label} | {_fmt(key, cfg.get(key))} |")
+    else:
+        run_names = [Path(str(f)).name for f in settings.selected_folders]
+        header = "| Parameter | " + " | ".join(run_names) + " |"
+        sep = "|-----------|" + "|".join(["---"] * len(run_names)) + "|"
+        lines = [header, sep]
+        for key, label in _CONFIG_FIELDS:
+            vals = " | ".join(_fmt(key, cfg.get(key)) for cfg in configs)
+            lines.append(f"| {label} | {vals} |")
+    return "\n".join(lines)
+
+
 def render_config_info(configs: List[Dict]) -> None:
     if not configs:
         return
@@ -65,6 +82,16 @@ def render_config_info(configs: List[Dict]) -> None:
             st.dataframe(
                 df.style.apply(_highlight_diff, axis=0),
                 use_container_width=True,
+            )
+
+        md = _configs_to_markdown(configs)
+        with st.expander("Markdown", expanded=False):
+            st.code(md, language="markdown")
+            st.download_button(
+                "Download .md",
+                data=md,
+                file_name="run_config.md",
+                mime="text/markdown",
             )
 
 

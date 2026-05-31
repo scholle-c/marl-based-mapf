@@ -1,7 +1,7 @@
 """Package containing the pathfinding model definition and modules for training, inference and evaluation of the model."""
 
 from .definition import DistanceTableCNN, DefaultModel
-from .training import train_vdn_on_solution, pretrain_on_default_value
+from .training import compute_vdn_tensors, pretrain_on_default_value, update_from_batch
 from .inference import load_model, save_checkpoint
 from .evaluation import get_soc
 from .stats import TrainingStats, MAPFStats, DistTableStats
@@ -19,8 +19,9 @@ __all__ = [
     "save_checkpoint",
     "build_input_tensor",
     "build_random_input_tensor",
-    "train_vdn_on_solution",
+    "compute_vdn_tensors",
     "pretrain_on_default_value",
+    "update_from_batch",
     "get_soc",
     "TrainingStats",
     "MAPFStats",

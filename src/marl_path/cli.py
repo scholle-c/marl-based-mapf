@@ -92,8 +92,15 @@ def main():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=200,
-        help="number of training epochs for the heuristic model. Each epoch includes solving an entire mapf instance.",
+        default=10,
+        help="number of training epochs for the heuristic model. Each epoch includes the solutions of the size of the batch.",
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="batch size for training the heuristic model. Each batch includes multiple (state, target) pairs collected from solving mapf instances.",
     )
 
     parser.add_argument(

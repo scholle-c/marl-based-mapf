@@ -3,7 +3,7 @@ Everything related to model training. Contains functions like updating the model
 """
 
 from __future__ import annotations
-from typing import Any, List
+from typing import Any, List, Tuple
 import torch
 import numpy as np
 
@@ -11,19 +11,15 @@ from marl_path.shared import Coord
 from .feature_extraction import FeatureExtractor, BasicExtractor
 
 
-def train_vdn_on_solution(
+def compute_vdn_tensors(
     model: Any,
-    optimizer: Any,
     solution: Any,
     starts: Any,
     goals: Any,
     map: Any,
     device: torch.device,
     extractor: FeatureExtractor,
-) -> float:
-    model.train()
-    optimizer.zero_grad()
-
+) -> Tuple[torch.Tensor, torch.Tensor]:
     num_agents = len(starts)
 
     target_q_tot: torch.Tensor = torch.zeros(
@@ -59,10 +55,23 @@ def train_vdn_on_solution(
             values_q_tot += agent_values
 
     assert values_q_tot is not None
-    loss = torch.nn.functional.mse_loss(values_q_tot, target_q_tot, reduction="mean")
-    loss.backward()
+    return values_q_tot, target_q_tot
+
+
+def update_from_batch(
+    model: Any, optimizer: Any, batch: List[Tuple[torch.Tensor, torch.Tensor]]
+) -> float:
+    if not batch:
+        return float("nan")
+    model.train()
+    optimizer.zero_grad()
+    total_loss = 0.0
+    for values, targets in batch:
+        loss = torch.nn.functional.mse_loss(values, targets, reduction="mean")
+        loss.backward()
+        total_loss += loss.item()
     optimizer.step()
-    return loss.item()
+    return total_loss / len(batch)
 
 
 def _get_path_target(path: Any) -> List[int]:

@@ -4,7 +4,8 @@ from .model import (
     DefaultModel,
     DistanceTableCNN,
     load_model,
-    train_vdn_on_solution,
+    compute_vdn_tensors,
+    update_from_batch,
     get_soc,
     pretrain_on_default_value,
     TrainingStats,
@@ -105,6 +106,13 @@ class DefaultTrainingPipeline(DefaultPipeline):
         )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr)
         self.random_seed_gen = random.Random(self.args.seed)
+        self._start_coverage = np.zeros(self.grid.shape, dtype=np.int32)
+        self._goal_coverage = np.zeros(self.grid.shape, dtype=np.int32)
+
+    def _record_coverage(self) -> None:
+        for s, g in zip(self.starts.positions, self.goals.positions):
+            self._start_coverage[s] += 1
+            self._goal_coverage[g] += 1
 
     def store_results(self) -> None:
         if self.args.record_mode != 0:
@@ -127,6 +135,22 @@ class DefaultTrainingPipeline(DefaultPipeline):
             }
             with open(args_path, "w") as f:
                 json.dump(data, f, indent=4)
+            np.savetxt(
+                os.path.join(
+                    self.args.output_dir, consts.DEFAULT_FILENAME_START_COVERAGE
+                ),
+                self._start_coverage,
+                delimiter=",",
+                fmt="%d",
+            )
+            np.savetxt(
+                os.path.join(
+                    self.args.output_dir, consts.DEFAULT_FILENAME_GOAL_COVERAGE
+                ),
+                self._goal_coverage,
+                delimiter=",",
+                fmt="%d",
+            )
             logger.info(
                 "Saved trained model and training stats to {}", self.args.output_dir
             )
@@ -206,46 +230,55 @@ class ExpertAlgorithmPretrainingPipeline(DefaultTrainingPipeline):
             self.device.type,
             self.args.seed,
         )
+        batch_size = self.args.batch_size
 
         # Start training loop
         for epoch in range(self.args.epochs):
             logger.info(f"\n====== Epoch {epoch + 1}/{self.args.epochs} ======")
-            solution = None
-            soc_model = None
-            soc_expert = None
-            seed = self.random_seed_gen.randint(0, SEED_MAX)
+            batch = []
+            socs_expert = []
+            runtime_expert = []
 
-            # solve MAPF using expert algorithm (LaCAM) to generate training data
-            planner = LaCAM()
+            for batch_idx in range(batch_size):
+                solution = None
+                seed = self.random_seed_gen.randint(0, SEED_MAX)
 
-            solution = planner.solve(
-                grid=self.grid,
-                starts=self.starts,
-                goals=self.goals,
-                seed=seed,
-                time_limit_ms=self.args.time_limit_ms,
-                flg_star=self.args.flg_star,
-                verbose=self.args.verbose,
-            )
+                # solve MAPF using expert algorithm (LaCAM) to generate training data
+                planner = LaCAM()
 
-            if len(solution) != 0:
-                soc_expert = get_soc(solution)
-                validate_mapf_solution(self.grid, self.starts, self.goals, solution)
-            else:
-                logger.info("No expert solution found this epoch.")
-                continue
+                solution = planner.solve(
+                    grid=self.grid,
+                    starts=self.starts,
+                    goals=self.goals,
+                    seed=seed,
+                    time_limit_ms=self.args.time_limit_ms,
+                    flg_star=self.args.flg_star,
+                    verbose=self.args.verbose,
+                )
 
-            # train model
-            mean_loss = train_vdn_on_solution(
-                self.model,
-                self.optimizer,
-                solution,
-                self.starts,
-                self.goals,
-                self.grid,
-                device=self.device,
-                extractor=self.extractor,
-            )
+                if len(solution) != 0:
+                    soc_expert = get_soc(solution)
+                    validate_mapf_solution(self.grid, self.starts, self.goals, solution)
+                    socs_expert.append(soc_expert)
+                    runtime_expert.append(planner.deadline.elapsed)
+                    self._record_coverage()
+                else:
+                    continue
+
+                # get tensors for training from the expert solution
+                values_q_tot, target_q_tot = compute_vdn_tensors(
+                    self.model,
+                    solution,
+                    self.starts,
+                    self.goals,
+                    self.grid,
+                    device=self.device,
+                    extractor=self.extractor,
+                )
+
+                batch.append((values_q_tot, target_q_tot))
+
+            mean_loss = update_from_batch(self.model, self.optimizer, batch)
 
             # Check the SOC for the model's solution (after training) and record training stats
             planner = LaCAM()
@@ -256,7 +289,6 @@ class ExpertAlgorithmPretrainingPipeline(DefaultTrainingPipeline):
                 model=self.model,
                 device=self.device,
                 extractor=self.extractor,
-                seed=seed,
                 time_limit_ms=self.args.time_limit_ms,
                 flg_star=self.args.flg_star,
                 verbose=self.args.verbose,
@@ -270,15 +302,14 @@ class ExpertAlgorithmPretrainingPipeline(DefaultTrainingPipeline):
                     mean_loss, soc_model, elapsed_time_model
                 )
             else:
-                dist_tables_model = [dt.table for dt in planner.dist_tables]
-                _record_empty_epoch(
-                    self.training_stats,
-                    dist_tables_model=dist_tables_model,
-                )
+                soc_model = None
+                _record_empty_epoch(self.training_stats)
                 logger.info("No model solution found this epoch.")
 
+            num_solved = len(socs_expert)
+            mean_soc_expert = sum(socs_expert) / num_solved if socs_expert else None
             logger.info(
-                f"  SOC (Model): {soc_model}, SOC (Expert): {soc_expert}, Mean Loss: {mean_loss:.4f}"
+                f"Solving Rate Expert: {num_solved}/{batch_size}, SOC (Model): {soc_model}, Mean SOC (Expert): {mean_soc_expert}, Mean Loss: {mean_loss:.4f}"
             )
 
         logger.info("Training completed after {} epochs.", self.args.epochs)
@@ -300,59 +331,70 @@ class VDNPipeline(DefaultTrainingPipeline):
             self.device.type,
             self.args.seed,
         )
+        batch_size = self.args.batch_size
 
         # Start training loop
         for epoch in range(self.args.epochs):
             logger.info(f"\n====== Epoch {epoch + 1}/{self.args.epochs} ======")
-            solution = None
-            soc = None
-            seed = self.random_seed_gen.randint(0, SEED_MAX)
+            batch = []
+            socs = []
+            runtimes = []
 
-            # solve MAPF using your model
-            planner = LaCAM()
+            for batch_idx in range(batch_size):
+                seed = self.random_seed_gen.randint(0, SEED_MAX)
 
-            solution = planner.solve(
-                grid=self.grid,
-                starts=self.starts,
-                goals=self.goals,
-                model=self.model,
-                device=self.device,
-                extractor=self.extractor,
-                seed=seed,
-                time_limit_ms=self.args.time_limit_ms,
-                flg_star=self.args.flg_star,
-                verbose=self.args.verbose,
-            )
+                # solve MAPF using your model
+                planner = LaCAM()
 
-            elapsed_time = planner.deadline.elapsed
-
-            if len(solution) != 0:
-                validate_mapf_solution(self.grid, self.starts, self.goals, solution)
-                soc = get_soc(solution)
-            else:
-                dist_tables_model = [dt.table for dt in planner.dist_tables]
-                _record_empty_epoch(
-                    self.training_stats,
-                    dist_tables_model=dist_tables_model,
+                solution = planner.solve(
+                    grid=self.grid,
+                    starts=self.starts,
+                    goals=self.goals,
+                    model=self.model,
+                    device=self.device,
+                    extractor=self.extractor,
+                    seed=seed,
+                    time_limit_ms=self.args.time_limit_ms,
+                    flg_star=self.args.flg_star,
+                    verbose=self.args.verbose,
                 )
-                logger.info("No solution found this epoch.")
-                continue
 
-            # train model
-            mean_loss = train_vdn_on_solution(
-                self.model,
-                self.optimizer,
-                solution,
-                self.starts,
-                self.goals,
-                self.grid,
-                device=self.device,
-                extractor=self.extractor,
+                elapsed_time = planner.deadline.elapsed
+
+                if len(solution) != 0:
+                    validate_mapf_solution(self.grid, self.starts, self.goals, solution)
+                    soc = get_soc(solution)
+                    socs.append(soc)
+                    runtimes.append(elapsed_time)
+                    self._record_coverage()
+                else:
+                    continue
+
+                # get tensors
+                values_q_tot, target_q_tot = compute_vdn_tensors(
+                    self.model,
+                    solution,
+                    self.starts,
+                    self.goals,
+                    self.grid,
+                    device=self.device,
+                    extractor=self.extractor,
+                )
+                batch.append((values_q_tot, target_q_tot))
+
+            # Update model from batch
+            mean_loss = update_from_batch(self.model, self.optimizer, batch)
+
+            # Statistics recording
+            num_solved = len(socs)
+            mean_soc = sum(socs) / len(socs) if socs else None
+            mean_runtime = sum(runtimes) / len(runtimes) if runtimes else None
+
+            self.training_stats.record_epoch(mean_loss, mean_soc, mean_runtime)
+
+            logger.info(
+                f"Solving Rate: {num_solved}/{batch_size}, Mean SOC: {mean_soc}, Mean Loss: {mean_loss:.4f}"
             )
-
-            self.training_stats.record_epoch(mean_loss, soc, elapsed_time)
-
-            logger.info(f"  SOC: {soc}, Mean Loss: {mean_loss:.4f}")
 
         logger.info("Training completed after {} epochs.", self.args.epochs)
 
@@ -400,21 +442,31 @@ def _get_device(device_str: str) -> torch.device:
         return torch.device("cpu")
 
     has_cuda = torch.cuda.is_available()
+    has_mps = torch.backends.mps.is_available()
 
     if device_str == "auto":
         if has_cuda:
             return torch.device("cuda")
+        elif has_mps:
+            return torch.device("mps")
         else:
             return torch.device("cpu")
 
     if device_str.startswith("cuda"):
-        if torch.cuda.is_available():
+        if has_cuda:
             return torch.device(device_str)
         else:
             print("CUDA is not available. Falling back to CPU.")
             return torch.device("cpu")
-    else:
-        raise ValueError(f"Unknown device string: {device_str}")
+
+    if device_str == "mps":
+        if has_mps:
+            return torch.device("mps")
+        else:
+            print("MPS is not available. Falling back to CPU.")
+            return torch.device("cpu")
+
+    raise ValueError(f"Unknown device string: {device_str}")
 
 
 def _record_empty_epoch(

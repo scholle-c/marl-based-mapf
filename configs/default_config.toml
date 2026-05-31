@@ -10,7 +10,8 @@ pipeline_mode   = "vdn"
 
 # RL training settings
 epochs          = 5
+batch_size      = 64
 lr              = 1e-3
-device          = "auto"
+device          = "mps"
 output_dir      = "./output/default_output"
 seed_training   = 1

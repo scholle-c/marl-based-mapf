@@ -15,6 +15,9 @@ dist_tables_model: List = []
 dist_tables_lacam: List = []
 map_mask: np.ndarray | None = None
 agent_paths: List[List[List[Tuple[int, int]]]] = []
+run_configs: List[Dict] = []
+start_coverages: List[np.ndarray | None] = []
+goal_coverages: List[np.ndarray | None] = []
 
 # Comparison page: dict mapping variant name -> list of TrainingStats (one per run)
 comparison_variants: Dict[str, List[TrainingStats]] = {}

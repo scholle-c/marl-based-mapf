@@ -14,6 +14,8 @@ DEFAULT_FILENAME_DIST_TABLE_MODEL: str = "dist_tables_model.csv"
 DEFAULT_FILENAME_DIST_TABLE_LACAM: str = "dist_tables_lacam.csv"
 DEFAULT_FILENAME_MAP_MASK: str = "map_mask.csv"
 DEFAULT_FILENAME_AGENT_PATHS: str = "agent_paths.json"
+DEFAULT_FILENAME_START_COVERAGE: str = "start_coverage.csv"
+DEFAULT_FILENAME_GOAL_COVERAGE: str = "goal_coverage.csv"
 
 # Folder Names
 FOLDER_COMPARISON_ALGOS: str = "other_algos"

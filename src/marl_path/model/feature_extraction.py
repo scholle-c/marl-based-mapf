@@ -40,9 +40,8 @@ def _add_relative_coords(tensor: torch.Tensor, goal: tuple[int, int]) -> torch.T
     x_rel = (torch.arange(width, dtype=torch.float32) - target_x) / width
     y_coords = y_rel.view(1, 1, height, 1).expand(batch_size, 1, height, width)
     x_coords = x_rel.view(1, 1, 1, width).expand(batch_size, 1, height, width)
-    if tensor.is_cuda:
-        y_coords = y_coords.cuda()
-        x_coords = x_coords.cuda()
+    y_coords = y_coords.to(tensor.device)
+    x_coords = x_coords.to(tensor.device)
     return torch.cat([tensor, y_coords, x_coords], dim=1)
 
 

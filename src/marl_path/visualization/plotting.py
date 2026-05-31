@@ -243,7 +243,7 @@ def plot_multiple_training_stats(training_stats_list: List[TrainingStats]) -> No
 
 def _plot_training_stats(
     num_epochs: int,
-    socs: List[int | None],
+    socs: List[int | float | None],
     losses: List[float | None],
     dist_table_differences: List | None = None,
     show: bool = True,

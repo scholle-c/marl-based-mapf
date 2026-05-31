@@ -25,7 +25,7 @@ _FILENAME_CONFIG = "config.json"
 class MAPFStats:
     """MAPF instance metadata and per-epoch solution quality."""
 
-    socs: List[int | None] = field(default_factory=list)
+    socs: List[int | float | None] = field(default_factory=list)
     elapsed_times: List[float | None] = field(default_factory=list)
     num_agents: int | None = None
     map_size: Tuple | None = None
@@ -138,7 +138,7 @@ class TrainingStats:
     def record_epoch(
         self,
         loss: float | None,
-        soc: int | None = None,
+        soc: int | float | None = None,
         elapsed_time: float | None = None,
     ) -> None:
         """Record scalar metrics for one training epoch."""
@@ -183,7 +183,7 @@ class TrainingStats:
             )
 
     def _save_metrics_csv(self, output_dir: str) -> None:
-        socs: List[int | None] = (
+        socs: List[int | float | None] = (
             self.mapf.socs if self.mapf else [None] * self._epoch_count
         )
         elapsed_times: List[float | None] = (

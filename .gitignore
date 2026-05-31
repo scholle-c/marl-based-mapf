@@ -73,3 +73,6 @@ scripts/
 
 # Git Hooks
 pyrightconfig.json
+
+# MacOS
+.DS_Store

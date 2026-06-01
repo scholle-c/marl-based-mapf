@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 from marl_path.shared.config import load_config
-from .pipeline import run_pipeline
+from .pipelines.pipeline import run_pipeline
 from . import constants as consts
 
 
@@ -76,6 +76,13 @@ def main():
     )
 
     parser.add_argument(
+        "--training-mode",
+        type=str,
+        default=consts.TRAINING_MODE_VDN,
+        help=f"Tensor/target computation strategy. '{consts.TRAINING_MODE_VDN}': VDN decomposition (sum agent values and targets). '{consts.TRAINING_MODE_INDIVIDUAL}': individual agent path loss (concatenate per-agent values and targets).",
+    )
+
+    parser.add_argument(
         "--feature-extractor-type",
         type=str,
         default=consts.EXTRACTOR_BASIC,
@@ -107,7 +114,7 @@ def main():
         "--model-initialization-mode",
         type=int,
         default=0,
-        help="mode for initializing the heuristic model. 0: random initialization, 1: pretrain on default value max map size (= width + height).",
+        help="mode for initializing the heuristic model. 0: random initialization, 1: pretrain on default value max map size (= width + height), 2: pretrain on BFS distance tables",
     )
 
     parser.add_argument(

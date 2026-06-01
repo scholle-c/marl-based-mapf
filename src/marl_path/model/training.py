@@ -3,11 +3,12 @@ Everything related to model training. Contains functions like updating the model
 """
 
 from __future__ import annotations
+from collections import deque
 from typing import Any, List, Tuple
 import torch
 import numpy as np
 
-from marl_path.shared import Coord
+from marl_path.shared import Coord, get_neighbors
 from .feature_extraction import FeatureExtractor, BasicExtractor
 
 
@@ -21,31 +22,16 @@ def compute_vdn_tensors(
     extractor: FeatureExtractor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     num_agents = len(starts)
+    dist_tables = _batch_dist_tables(model, extractor, map, starts, goals, device)
 
     target_q_tot: torch.Tensor = torch.zeros(
         len(solution), dtype=torch.float32, device=device
     )
     values_q_tot = None
 
-    # TODO: Maybe this can be parallized or done using np methods on solution?
     for agent_idx in range(num_agents):
         path = [solution[t][agent_idx] for t in range(len(solution))]
-        other_agent_goals = [goals[i] for i in range(num_agents) if i != agent_idx]
-        dist_table = (
-            model(
-                extractor.extract(
-                    map,
-                    goals[agent_idx],
-                    starts[agent_idx],
-                    other_agent_goals,
-                    device=device,
-                )
-            )
-            .squeeze(0)
-            .squeeze(0)
-        )
-
-        agent_values = _get_via_coordinates(dist_table, path)
+        agent_values = _get_via_coordinates(dist_tables[agent_idx], path)
         agent_targets = _get_path_target(path)
 
         target_q_tot += torch.tensor(agent_targets, dtype=torch.float32, device=device)
@@ -58,8 +44,64 @@ def compute_vdn_tensors(
     return values_q_tot, target_q_tot
 
 
+def compute_individual_tensors(
+    model: Any,
+    solution: Any,
+    starts: Any,
+    goals: Any,
+    map: Any,
+    device: torch.device,
+    extractor: FeatureExtractor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Like compute_vdn_tensors but without VDN decomposition: each agent's
+    predicted values and targets are concatenated rather than summed, so the
+    loss is computed independently per agent per timestep."""
+    num_agents = len(starts)
+    dist_tables = _batch_dist_tables(model, extractor, map, starts, goals, device)
+
+    all_values: list[torch.Tensor] = []
+    all_targets: list[torch.Tensor] = []
+
+    for agent_idx in range(num_agents):
+        path = [solution[t][agent_idx] for t in range(len(solution))]
+        all_values.append(_get_via_coordinates(dist_tables[agent_idx], path))
+        all_targets.append(
+            torch.tensor(_get_path_target(path), dtype=torch.float32, device=device)
+        )
+
+    return torch.cat(all_values), torch.cat(all_targets)
+
+
+def _batch_dist_tables(
+    model: Any,
+    extractor: FeatureExtractor,
+    map: Any,
+    starts: Any,
+    goals: Any,
+    device: torch.device,
+) -> torch.Tensor:
+    """Single batched forward pass for all agents, returns (num_agents, H, W)."""
+    num_agents = len(starts)
+    inputs = torch.cat(
+        [
+            extractor.extract(
+                map,
+                goals[i],
+                starts[i],
+                [goals[j] for j in range(num_agents) if j != i],
+                device=device,
+            )
+            for i in range(num_agents)
+        ]
+    )  # (num_agents, C, H, W)
+    return model(inputs).squeeze(1)  # (num_agents, H, W)
+
+
 def update_from_batch(
-    model: Any, optimizer: Any, batch: List[Tuple[torch.Tensor, torch.Tensor]]
+    model: Any,
+    optimizer: Any,
+    batch: List[Tuple[torch.Tensor, torch.Tensor]],
+    loss_fn=torch.nn.functional.mse_loss,
 ) -> float:
     if not batch:
         return float("nan")
@@ -67,7 +109,7 @@ def update_from_batch(
     optimizer.zero_grad()
     total_loss = 0.0
     for values, targets in batch:
-        loss = torch.nn.functional.mse_loss(values, targets, reduction="mean")
+        loss = loss_fn(values, targets)
         loss.backward()
         total_loss += loss.item()
     optimizer.step()
@@ -126,6 +168,22 @@ def _get_via_coordinates(arr: Any, coords: List[Coord]) -> Any:
     return arr[idx]
 
 
+def _compute_bfs_table(grid: Any, goal: Coord) -> np.ndarray:
+    """Full BFS distance table from goal. Unreachable/wall cells keep NIL = grid.size."""
+    NIL = grid.size
+    table = np.full(grid.shape, NIL, dtype=np.float32)
+    table[goal] = 0
+    Q: deque[Coord] = deque([goal])
+    while Q:
+        u = Q.popleft()
+        d = int(table[u])
+        for v in get_neighbors(grid, u):
+            if d + 1 < table[v]:
+                table[v] = d + 1
+                Q.append(v)
+    return table
+
+
 def pretrain_on_default_value(
     model: Any,
     grid: Any,
@@ -173,5 +231,55 @@ def pretrain_on_default_value(
         )
         value_tensor = model(random_input).squeeze(0).squeeze(0)
         mean_loss = torch.nn.functional.mse_loss(value_tensor, target_tensor)
+        mean_loss.backward()
+        optimizer.step()
+
+
+def pretrain_on_bfs(
+    model: Any,
+    grid: Any,
+    optimizer: Any,
+    num_epochs: int = 10,
+    device: torch.device | None = None,
+    extractor: FeatureExtractor | None = None,
+) -> None:
+    """
+    Trains the distance-table model, to predict the distance to a random goal
+    from a random start on the given grid, using BFS as the target heuristic.
+
+    Args:
+        model (DistanceTableCNN): The model that should be trained
+        grid (Grid): The map that the model should be trained on
+        num_epochs (int, optional): How many epochs should be used for training. Defaults to 10.
+        extractor: Feature extractor to use. Defaults to BasicExtractor.
+    """
+    if extractor is None:
+        extractor = BasicExtractor()
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    accessible = np.argwhere(grid)
+    model.train()
+    for _ in range(num_epochs):
+        optimizer.zero_grad()
+        idx = np.random.choice(len(accessible), size=2, replace=False)
+        goal: tuple[int, int] = (int(accessible[idx[0], 0]), int(accessible[idx[0], 1]))
+        start: tuple[int, int] = (
+            int(accessible[idx[1], 0]),
+            int(accessible[idx[1], 1]),
+        )
+        random_input: torch.Tensor = extractor.extract(
+            grid, goal, start, [], device=device
+        )
+        value_tensor = model(random_input).squeeze(0).squeeze(0)
+
+        bfs_table = _compute_bfs_table(grid, goal)
+        target_tensor = torch.tensor(bfs_table, dtype=torch.float32, device=device)
+
+        # Mask out walls so their NIL values don't dominate the loss
+        mask = torch.tensor(grid.astype(bool), device=device)
+        mean_loss = torch.nn.functional.mse_loss(
+            value_tensor[mask], target_tensor[mask]
+        )
         mean_loss.backward()
         optimizer.step()

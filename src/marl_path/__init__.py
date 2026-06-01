@@ -1,4 +1,4 @@
-from .pipeline import run_pipeline
+from .pipelines.pipeline import run_pipeline
 from .cli import main
 import sys
 from loguru import logger

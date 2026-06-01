@@ -2,6 +2,19 @@ import argparse
 from pathlib import Path
 from marl_path.shared.config import load_config
 from .pipeline import run_pipeline
+from . import constants as consts
+
+
+def _dev_path(*parts: str) -> Path | None:
+    """Return a path relative to the project root only if it actually exists.
+
+    Works in an editable/dev install where the source tree is present next to
+    the package.  Returns None when installed as a regular package (e.g. inside
+    a venv on a server) so that argparse falls back to requiring the user to
+    supply the value explicitly.
+    """
+    candidate = Path(__file__).parent.parent.parent.joinpath(*parts)
+    return candidate if candidate.is_file() else None
 
 
 def main():
@@ -12,106 +25,109 @@ def main():
         "-c",
         "--config-file",
         type=Path,
-        default=Path(__file__).parent.parent.parent / "configs" / "default_config.toml",
+        default=_dev_path("configs", "default_config.toml"),
     )
 
     parser.add_argument(
         "-m",
         "--map-file",
         type=Path,
-        default=Path(__file__).parent.parent.parent / "assets" / "tunnel.map",
+        default=_dev_path("assets", "tunnel.map"),
     )
+
     parser.add_argument(
         "-i",
         "--scen-file",
         type=Path,
-        default=Path(__file__).parent.parent.parent / "assets" / "tunnel.scen",
+        default=_dev_path("assets", "tunnel.scen"),
     )
+
     parser.add_argument(
         "-N",
         "--num-agents",
         type=int,
         default=4,
     )
+
     parser.add_argument(
         "-v",
         "--verbose",
         type=int,
         default=1,
     )
+
     parser.add_argument(
         "--flg-star",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="choose LaCAM* (default) or vanilla LaCAM",
     )
+
     parser.add_argument("-s", "--seed", type=int, default=0)
 
     parser.add_argument("-t", "--time-limit-ms", type=int, default=1000)
 
     # ======== Arguments for training the distance table predictor ========
     parser.add_argument(
-        "--training-mode",
+        "--pipeline-mode",
         type=str,
-        default="model",
-        help="Choose between: 'model' (train with model-based solutions), "
-        "'lacam_only' (no training, just one LaCAM execution), and 'best' "
-        "(take best solution from either LaCAM or model per epoch). Default: 'model'",
+        default="vdn",
+        help=f"Choose between: '{consts.PIPELINE_MODE_VDN}': train the heuristic model using VDN loss. '{consts.PIPELINE_MODE_EXPERT_PRETRAIN}': pretrain the heuristic model using solutions from an expert algorithm. '{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM once without any rl training or using a distance table CNN model.",
     )
 
     parser.add_argument(
-        "--epsilon-function",
+        "--feature-extractor-type",
         type=str,
-        default="none",
-        help="Is used for exploration: Epsilon is a chance, of choosing the worse solution over the better one to explore alternative solutions. Is only used, when training-mode=best. Choose between: 'none' (no epsilon-greedy), 'sine' (sine function over epochs), 'fixed' (1/4 epochs exploitation, 1/2 exploration, 1/4 exploitation). Default: 'none'",
-    )
-
-    parser.add_argument(
-        "--epsilon-min",
-        type=float,
-        default=0.1,
-        help="minimum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
-    )
-
-    parser.add_argument(
-        "--epsilon-max",
-        type=float,
-        default=0.8,
-        help="maximum epsilon value for epsilon-greedy exploration. Only relevant if epsilon-function is not 'none'.",
+        default=consts.EXTRACTOR_BASIC,
+        help=f"type of feature extractor to use for the heuristic model. Choose between: {consts.EXTRACTOR_BASIC}: 3 channels (map, goal, start), {consts.EXTRACTOR_OTHER_AGENTS_CHANNEL}: basic + one binary channel marking all other agent positions",
     )
 
     parser.add_argument(
         "--model-file",
         type=Path,
         default=None,
-        help="path to a pretrained distance table CNN model",
+        help="path to a pretrained heuristic model",
     )
 
     parser.add_argument(
         "--epochs",
         type=int,
-        default=100,
-        help="number of training epochs for the distance table CNN model. Each epoch goes over an entire run of the LaCAM planner.",
+        default=10,
+        help="number of training epochs for the heuristic model. Each epoch includes the solutions of the size of the batch.",
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="batch size for training the heuristic model. Each batch includes multiple (state, target) pairs collected from solving mapf instances.",
+    )
+
+    parser.add_argument(
+        "--model-initialization-mode",
+        type=int,
+        default=0,
+        help="mode for initializing the heuristic model. 0: random initialization, 1: pretrain on default value max map size (= width + height).",
     )
 
     parser.add_argument(
         "--lr",
         type=float,
         default=0.001,
-        help="learning rate for training the distance table CNN model.",
+        help="learning rate for training the heuristic model.",
     )
 
     parser.add_argument(
         "--device",
         type=str,
         default="cpu",
-        help="device to use for training the distance table CNN model (e.g., 'cpu' or 'cuda').",
+        help="device to use for training the heuristic model (e.g., 'cpu' or 'cuda').",
     )
 
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(__file__).parent / "output",
+        default=Path("output") / "default_output",
         help="path to save metrics and results of the training and evaluation.",
     )
 
@@ -119,78 +135,59 @@ def main():
         "--seed-training",
         type=int,
         default=0,
-        help="random seed for training the distance table CNN model.",
-    )
-
-    parser.add_argument(
-        "--use-pretraining",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="whether to pretrain the distance table model on the map size as default values before training with LaCAM.",
-    )
-
-    parser.add_argument(
-        "--use-neighbors",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="whether to include neighboring cells in the loss computation when training the distance table model.",
-    )
-
-    parser.add_argument(
-        "--goal-weight",
-        type=float,
-        default=1.0,
-        help="Weight of the loss value for the goal prediction, which has the target value 0.",
-    )
-
-    parser.add_argument(
-        "--use-bellman-loss",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="whether to include the Bellman loss when training the distance table model.",
+        help="random seed for training the heuristic model.",
     )
 
     # ======== Arguments the visualization afterwards ========
     parser.add_argument(
-        "--dist-table-record-mode",
+        "--record-mode",
+        type=int,
+        default=1,
+        help="mode for recording training process. 0: no recording",
+    )
+
+    parser.add_argument(
+        "--record-num-agents",
         type=int,
         default=0,
-        help="mode for recording distance tables during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
+        help="number of agents to record during training. 0: record all agents",
     )
 
     parser.add_argument(
-        "--dist-table-record-granularity",
+        "--record-paths",
+        type=bool,
+        default=False,
+        help="whether to record the paths of agents during training. 0: do not record, 1: record paths",
+    )
+
+    parser.add_argument(
+        "--record-heuristics",
+        type=bool,
+        default=False,
+        help="whether to record the heuristics of agents during training. 0: do not record, 1: record heuristics",
+    )
+
+    parser.add_argument(
+        "--record-episode-interval",
         type=int,
-        default=10,
-        help="granularity for recording distance tables (number of epochs when recording occurs). Only relevant if dist-table-record-mode is not 0.",
+        default=100,
+        help="interval (in episodes) at which to record training metrics and results.",
     )
 
     parser.add_argument(
-        "--agent-path-record-mode",
-        type=int,
-        default=0,
-        help="mode for recording agent paths during training. 0: no recording, 1: record all epochs (WARINING: storage intensive with large maps/number of agents) 2: record for only one agent",
-    )
-
-    parser.add_argument(
-        "--agent-path-record-granularity",
-        type=int,
-        default=10,
-        help="granularity for recording agent paths (number of epochs when recording occurs). Only relevant if agent-path-record-mode is not 0.",
-    )
-
-    parser.add_argument(
-        "--save-map-mask",
+        "--record-logs",
         type=bool,
         default=True,
-        help="if set to true, an outline of the map is stored for later visualization.",
+        help="whether to record the logs of training. 0: do not record, 1: record logs",
     )
 
-    args = parser.parse_args()
-    if args.config_file is not None:
-        config = load_config(args.config_file)
-        args.__dict__.update(config)
+    # Load config as defaults so explicit CLI args can still override them.
+    first_pass, _ = parser.parse_known_args()
+    if first_pass.config_file is not None:
+        config = load_config(first_pass.config_file)
+        parser.set_defaults(**config)
 
+    args = parser.parse_args()
     run_pipeline(args)
 
 

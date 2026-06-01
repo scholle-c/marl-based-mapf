@@ -6,22 +6,26 @@ import torch
 from typing import Optional
 
 from marl_path.shared.mapf_utils import Coord, Grid, get_neighbors, is_valid_coord
-from marl_path.model.definition import DistanceTableCNN
-from marl_path.model.training import build_input_tensor
+from marl_path.model.definition import DefaultModel
+from marl_path.model.feature_extraction import FeatureExtractor, BasicExtractor
 
 
 @dataclass
 class DistTable:
     grid: Grid
     goal: Coord
-    model: Optional[DistanceTableCNN] = None
+    model: Optional[DefaultModel] = None
     device: torch.device | None = None
+    extractor: Optional[FeatureExtractor] = None
+    other_agents: list[Coord] = field(default_factory=lambda: [])
     has_model_generated: bool = field(init=False, default=False)
     Q: deque = field(init=False)
     table: np.ndarray = field(init=False)  # distance matrix
     NIL: int = field(init=False)
 
     def __post_init__(self):
+        if self.extractor is None:
+            self.extractor = BasicExtractor()
         self.NIL = self.grid.size
         self.Q = deque([self.goal])
         self.table = np.full(self.grid.shape, self.NIL, dtype=int)
@@ -43,9 +47,9 @@ class DistTable:
             self.has_model_generated = True
             return self.compute_table_model(target)  # type: ignore
 
-    def compute_table_model(self, target: Coord) -> None:
-        self.input_tensor: torch.Tensor = build_input_tensor(
-            self.grid, self.goal, target, device=self.device
+    def compute_table_model(self, target: Coord) -> int:
+        self.input_tensor: torch.Tensor = self.extractor.extract(  # type: ignore[union-attr]
+            self.grid, self.goal, target, self.other_agents, device=self.device
         )
         with torch.no_grad():
             output: torch.Tensor = self.model(self.input_tensor)  # type: ignore

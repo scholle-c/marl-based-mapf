@@ -5,27 +5,65 @@ to load a model and run a forward pass.
 
 from __future__ import annotations
 
-from .definition import DistanceTableCNN
+from .definition import DefaultModel, DistanceTableCNN
+from .feature_extraction import (
+    FeatureExtractor,
+    BasicExtractor,
+    OtherAgentsChannelExtractor,
+)
 import torch
 import numpy as np
 from typing import Any
 
 
-def load_model(model_path: str, device: torch.device | None = None) -> Any:
-    """
-    Load a trained model for inference.
-    """
+def save_checkpoint(
+    model: DefaultModel, extractor: FeatureExtractor, path: str
+) -> None:
+    """Save model weights and extractor config together."""
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "extractor": {
+                "class": type(extractor).__name__,
+                "use_coord_channels": getattr(extractor, "_use_coord_channels", True),
+            },
+            "model_config": {"in_channels": extractor.n_channels},
+        },
+        path,
+    )
+
+
+def load_model(
+    model_path: str, device: torch.device | None = None
+) -> tuple[DefaultModel, FeatureExtractor]:
+    """Load a trained model and its extractor from a checkpoint."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DistanceTableCNN().to(device)
-    state_dict = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device)
+    if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
+        extractor = _extractor_from_config(checkpoint.get("extractor"))
+        in_channels = checkpoint.get("model_config", {}).get(
+            "in_channels", extractor.n_channels
+        )
+    else:
+        # Legacy format: bare state_dict saved with torch.save(model.state_dict(), path)
+        state_dict = checkpoint
+        extractor = BasicExtractor()
+        in_channels = 5
+    model = DistanceTableCNN(in_channels=in_channels).to(device)
     model.load_state_dict(state_dict)
     model.eval()
-    return model
+    return model, extractor
 
 
 def predict_distance_table(
-    model: DistanceTableCNN, grid: Any, start: tuple[int, int], goal: tuple[int, int]
+    model: DistanceTableCNN,
+    grid: Any,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    extractor: FeatureExtractor | None = None,
+    other_agents: list[tuple[int, int]] | None = None,
 ) -> Any:
     """
     Predict a distance/value table for the provided map, start, and goal.
@@ -38,34 +76,33 @@ def predict_distance_table(
         Goal coordinate as (y, x) in grid coordinates.
     grid:
         2D map array where non-zero entries denote traversable cells.
-
-    Returns
-    -------
-    np.ndarray
-        Predicted distance table with shape (H, W).
+    extractor:
+        Feature extractor to use. Defaults to BasicExtractor.
+    other_agents:
+        Positions of other agents to encode. Defaults to empty list.
     """
+    if extractor is None:
+        extractor = BasicExtractor()
+    if other_agents is None:
+        other_agents = []
+
     grid_np = np.asarray(grid)
     if grid_np.ndim != 2:
         raise ValueError("Grid must be a 2D array.")
 
-    start_y, start_x = int(start[0]), int(start[1])
-    goal_y, goal_x = int(goal[0]), int(goal[1])
-
-    if not grid_np[goal_y, goal_x]:
-        raise ValueError(f"Goal {goal} is not accessible in the provided map.")
-    if not grid_np[start_y, start_x]:
-        raise ValueError(f"Start {start} is not accessible in the provided map.")
-
-    map_channel = grid_np.astype(np.float32, copy=False)
-    goal_channel = np.zeros_like(map_channel, dtype=np.float32)
-    goal_channel[goal_y, goal_x] = 1.0
-    start_channel = np.zeros_like(map_channel, dtype=np.float32)
-    start_channel[start_y, start_x] = 1.0
-    stacked = np.stack((map_channel, goal_channel, start_channel), axis=0)
-
     device = next(model.parameters()).device
-    input_tensor = torch.from_numpy(stacked).unsqueeze(0).to(device)
+    input_tensor = extractor.extract(grid_np, goal, start, other_agents, device=device)
 
     with torch.no_grad():
         prediction = model(input_tensor).squeeze().cpu().numpy()
     return prediction
+
+
+def _extractor_from_config(config: dict | None) -> FeatureExtractor:
+    if config is None:
+        return BasicExtractor()
+    use_coord = config.get("use_coord_channels", True)
+    cls_name = config.get("class", "BasicExtractor")
+    if cls_name == "OtherAgentsChannelExtractor":
+        return OtherAgentsChannelExtractor(use_coord_channels=use_coord)
+    return BasicExtractor(use_coord_channels=use_coord)

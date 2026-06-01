@@ -73,7 +73,7 @@ def build_random_input_tensor(
     tensor = torch.from_numpy(stacked).unsqueeze(0)
     if device is not None:
         tensor = tensor.to(device)
-    
+
     if use_coord_channels:
         tensor = _add_coords(tensor, random_goal)
     return tensor

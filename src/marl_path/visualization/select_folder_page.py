@@ -3,7 +3,12 @@ import numpy as np
 import streamlit as st
 import marl_path.visualization.settings as settings
 from marl_path.visualization.plotting import load_stats, load_dist_tables
-from marl_path.constants import DEFAULT_FILENAME_MAP_MASK, DEFAULT_FILENAME_AGENT_PATHS
+from marl_path.constants import (
+    DEFAULT_FILENAME_MAP_MASK,
+    DEFAULT_FILENAME_AGENT_PATHS,
+    DEFAULT_FILENAME_START_COVERAGE,
+    DEFAULT_FILENAME_GOAL_COVERAGE,
+)
 
 
 def load_map_mask(folders):
@@ -18,6 +23,39 @@ def load_map_mask(folders):
     map_mask_path = first_folder / DEFAULT_FILENAME_MAP_MASK
     if map_mask_path.is_file():
         settings.map_mask = np.loadtxt(map_mask_path, delimiter=",", dtype=int)
+
+
+def load_coverages(folders):
+    """Load start/goal coverage arrays from each selected folder, if present."""
+    settings.start_coverages = []
+    settings.goal_coverages = []
+    for folder in folders:
+        sc_path = folder / DEFAULT_FILENAME_START_COVERAGE
+        gc_path = folder / DEFAULT_FILENAME_GOAL_COVERAGE
+        if sc_path.is_file() and gc_path.is_file():
+            settings.start_coverages.append(
+                np.loadtxt(sc_path, delimiter=",", dtype=np.int32)
+            )
+            settings.goal_coverages.append(
+                np.loadtxt(gc_path, delimiter=",", dtype=np.int32)
+            )
+        else:
+            settings.start_coverages.append(None)
+            settings.goal_coverages.append(None)
+
+
+def load_run_configs(folders):
+    """Load used_config.json (or config.json) from each selected folder."""
+    settings.run_configs = []
+    for folder in folders:
+        for name in ("used_config.json", "config.json"):
+            path = folder / name
+            if path.is_file():
+                with open(path) as f:
+                    settings.run_configs.append(json.load(f))
+                break
+        else:
+            settings.run_configs.append({})
 
 
 def load_agent_paths(folders):
@@ -84,7 +122,8 @@ st.markdown("The following folders with training statistics have been found:")
 training_dirs = [
     p
     for p in settings.cwd.iterdir()
-    if p.is_dir() and (p / "training_stats.json").is_file()
+    if p.is_dir()
+    and ((p / "training_stats.json").is_file() or (p / "metrics.csv").is_file())
 ]
 training_dirs.sort(key=lambda p: p.name.lower())
 
@@ -110,5 +149,7 @@ if load_data_btn:
         )
         load_map_mask(selected_training)
         load_agent_paths(selected_training)
+        load_run_configs(selected_training)
+        load_coverages(selected_training)
     st.success("Done")
     st.switch_page(settings.OVERVIEW_PAGE)

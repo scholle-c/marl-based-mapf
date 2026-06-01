@@ -57,21 +57,25 @@ def run_plotting(args: argparse.Namespace) -> None:
 
 def load_stats(paths: List[str]) -> List[TrainingStats]:
     """
-    Returns training statistics from a stats JSON file.
+    Returns training statistics from a stats file or directory.
+    Supports the new format (metrics.csv + config.json) and the legacy JSON format.
     """
     training_stats = []
     for path in paths:
         target_path = path
         if os.path.isdir(target_path):
-            json_files = _find_json_files_in_folder(
-                target_path, consts.DEFAULT_FILENAME_TRAINING_STATS
-            )
-            training_stats.extend(load_stats(json_files))
+            metrics = os.path.join(target_path, "metrics.csv")
+            if os.path.isfile(metrics):
+                training_stats.append(TrainingStats.load(target_path))
+            else:
+                json_files = _find_json_files_in_folder(
+                    target_path, consts.DEFAULT_FILENAME_TRAINING_STATS
+                )
+                training_stats.extend(load_stats(json_files))
         elif not os.path.isfile(target_path):
             raise FileNotFoundError(f"Could not find stats file at {target_path}")
         else:
-            stats = TrainingStats.load_from_json(target_path)
-            training_stats.append(stats)
+            training_stats.append(TrainingStats.load_from_json(target_path))
     return training_stats
 
 
@@ -200,78 +204,55 @@ def aggregate(F: List[List]) -> Tuple[List, List, List]:
 
 
 def plot_training_stats(training_stats: TrainingStats) -> None:
-    socs_model = training_stats.socs_model if training_stats.used_best_mode else None
-    socs_no_model = (
-        training_stats.socs_no_model if training_stats.used_best_mode else None
-    )
     dist_table_differences = (
-        training_stats.dist_table_differences
-        if training_stats.has_dist_table_differences
+        training_stats.dist_tables._diffs
+        if training_stats.dist_tables is not None and training_stats.dist_tables._diffs
         else None
     )
     _plot_training_stats(
-        num_epochs=training_stats.epochs,
-        socs=training_stats.socs,
-        losses=training_stats.training_loss,
-        socs_model=socs_model,
-        socs_no_model=socs_no_model,
+        num_epochs=training_stats._epoch_count,
+        socs=training_stats.mapf.socs if training_stats.mapf else [],
+        losses=training_stats._losses,
         dist_table_differences=dist_table_differences,
     )
 
 
 def plot_multiple_training_stats(training_stats_list: List[TrainingStats]) -> None:
-    aligned_socs = align_runs([stats.socs for stats in training_stats_list])
-    aligned_losses = align_runs([stats.training_loss for stats in training_stats_list])
-    socs_model = None
-    socs_no_model = None
+    aligned_socs = align_runs(
+        [stats.mapf.socs if stats.mapf else [] for stats in training_stats_list]
+    )
+    aligned_losses = align_runs([stats._losses for stats in training_stats_list])
     dist_table_differences = None
-
-    if all(stats.used_best_mode for stats in training_stats_list):
-        socs_model = align_runs([stats.socs_model for stats in training_stats_list])
-        socs_no_model = align_runs(
-            [stats.socs_no_model for stats in training_stats_list]
-        )
-
     if all(stats.has_dist_table_differences for stats in training_stats_list):
         dist_table_differences = align_runs(
-            [stats.dist_table_differences for stats in training_stats_list]
+            [
+                stats.dist_tables._diffs
+                for stats in training_stats_list
+                if stats.dist_tables is not None
+            ]
         )
 
-    num_epochs = min(stats.epochs for stats in training_stats_list)
+    num_epochs = min(stats._epoch_count for stats in training_stats_list)
     _plot_multiple_training_stats(
         num_epochs=num_epochs,
         socs=aligned_socs,
         losses=aligned_losses,
-        socs_model=socs_model,
-        socs_no_model=socs_no_model,
         dist_table_differences=dist_table_differences,
     )
 
 
 def _plot_training_stats(
     num_epochs: int,
-    socs: List[int | None],
+    socs: List[int | float | None],
     losses: List[float | None],
-    socs_model: List | None = None,
-    socs_no_model: List | None = None,
     dist_table_differences: List | None = None,
     show: bool = True,
 ) -> None:
-    """
-    Plot training statistics of a single training run.
-
-    Args:
-        num_epochs (int): Number of training epochs.
-        socs (List[int]): List of SOCs per epoch.
-        losses (List[float]): List of losses per epoch.
-        stats_paths (List[str]): List of paths to the stats files.
-    """
-
-    # Fill None values with np.nan for plotting
-    socs_cleaned: List[float] = [s if s is not None else np.nan for s in socs]
+    """Plot training statistics of a single training run."""
     losses_cleaned: List[float] = [
         loss if loss is not None else np.nan for loss in losses
     ]
+    socs_cleaned: List[float] = [soc if soc is not None else np.nan for soc in socs]
 
     plt.figure(figsize=(12, 5))
     epochs = list(range(1, num_epochs + 1))
@@ -282,28 +263,13 @@ def _plot_training_stats(
         num_columns = 3
 
     plt.subplot(1, num_columns, 1)
-    #plt.plot(
-    #    epochs,
-    #    socs_cleaned,
-    #    color=SOC_PLOTTING_PARAMS["color"],
-    #    marker=SOC_PLOTTING_PARAMS["marker"],
-    #    label=SOC_PLOTTING_PARAMS["label"],
-    #)
-    if socs_model is not None and socs_no_model is not None:
-        plt.plot(
-            epochs,
-            socs_model,
-            color=SOC_MODEL_PLOTTING_PARAMS["color"],
-            marker=SOC_MODEL_PLOTTING_PARAMS["marker"],
-            label=SOC_MODEL_PLOTTING_PARAMS["label"],
-        )
-        plt.plot(
-            epochs,
-            socs_no_model,
-            color=SOC_NO_MODEL_PLOTTING_PARAMS["color"],
-            marker=SOC_NO_MODEL_PLOTTING_PARAMS["marker"],
-            label=SOC_NO_MODEL_PLOTTING_PARAMS["label"],
-        )
+    plt.plot(
+        epochs,
+        socs_cleaned,
+        color=SOC_PLOTTING_PARAMS["color"],
+        marker=SOC_PLOTTING_PARAMS["marker"],
+        label=SOC_PLOTTING_PARAMS["label"],
+    )
 
     plt.title("Sum of Costs (SOC) over Epochs")
     plt.xlabel("Epoch")
@@ -346,8 +312,6 @@ def _plot_multiple_training_stats(
     num_epochs: int,
     socs: List[List[int]],
     losses: List[List[float]],
-    socs_model: List[List[int]] | None = None,
-    socs_no_model: List[List[int]] | None = None,
     dist_table_differences: List[List[float]] | None = None,
     show: bool = True,
 ) -> None:
@@ -362,52 +326,16 @@ def _plot_multiple_training_stats(
     plt.subplot(1, num_columns, 1)
 
     mean_socs, min_socs, max_socs = aggregate(socs)
-    #plt.plot(
-    #    epochs,
-    #    mean_socs,
-    #    color=SOC_PLOTTING_PARAMS["color"],
-    #    linewidth=2,
-    #    label=SOC_PLOTTING_PARAMS["label_multiple"],
-    #)
-    if socs_model is not None and socs_no_model is not None:
-        soc_model = align_runs(socs_model)
-        soc_no_model = align_runs(socs_no_model)
-        mean_soc_model, min_soc_model, max_soc_model = aggregate(soc_model)
-        mean_soc_no_model, min_soc_no_model, max_soc_no_model = aggregate(soc_no_model)
-        plt.fill_between(
-            epochs,
-            min_soc_model,
-            max_soc_model,
-            alpha=0.2,
-            color="lightgreen",
-            label="SOC with Model range",
-        )
-        plt.fill_between(
-            epochs,
-            min_soc_no_model,
-            max_soc_no_model,
-            alpha=0.2,
-            color="lightcoral",
-            label="SOC without Model range",
-        )
-        plt.plot(
-            epochs,
-            mean_soc_model,
-            color=SOC_MODEL_PLOTTING_PARAMS["color"],
-            linewidth=2,
-            label=SOC_MODEL_PLOTTING_PARAMS["label_multiple"],
-        )
-        plt.plot(
-            epochs,
-            mean_soc_no_model,
-            color=SOC_NO_MODEL_PLOTTING_PARAMS["color"],
-            linewidth=2,
-            label=SOC_NO_MODEL_PLOTTING_PARAMS["label_multiple"],
-        )
-    else:
-        plt.fill_between(
-            epochs, min_socs, max_socs, alpha=0.2, color="skyblue", label="SOC range"
-        )
+    plt.fill_between(
+        epochs, min_socs, max_socs, alpha=0.2, color="skyblue", label="SOC range"
+    )
+    plt.plot(
+        epochs,
+        mean_socs,
+        color=SOC_PLOTTING_PARAMS["color"],
+        linewidth=2,
+        label=SOC_PLOTTING_PARAMS["label_multiple"],
+    )
 
     plt.title("Sum of Costs (SOC) over Epochs")
     plt.xlabel("Epoch")
@@ -459,7 +387,7 @@ def _plot_multiple_training_stats(
             max_dist_table_differences,
             alpha=0.2,
             color="plum",
-            #label="Distance Table Differences range",
+            # label="Distance Table Differences range",
         )
         plt.fill_between(
             epochs,

@@ -41,49 +41,105 @@ need to follow a few quick steps beforehand:
   - `map_file`: Path to your `.map` file
   - `scen_file`: Path to your `.scen` file
   - `num_agents`: How many agents should be present. Cannot be more than the ones defined in the `.scen` file
-- You can delete parameters that you don't want to change; the program will assign them default values.
+- You can delete parameters that you don't want to change; the program will assign them default values
+- CLI arguments always override values set in the config file
 - You can find a list of all possible parameters in the [Arguments for Configuration or the CLI](#arguments-for-configuration-or-the-cli) section
 
 Example snippet:
 
 ```toml
-map_file = "assets/my_map.map"
-scen_file = "assets/my_map.scen"
-num_agents = 8
-seed = 42
-output_folder = "output/my_run"
+map_file        = "assets/my_map.map"
+scen_file       = "assets/my_map.scen"
+num_agents      = 8
+seed            = 42
+output_dir      = "output/my_run"
+```
+
+## Benchmarking
+
+To run a single config five times with different seeds (outputs land in `<output_dir>/run1` … `run5`):
+
+```console
+scripts\run_five_times.bat configs\my_config.toml
+```
+
+To run every `.toml` file in a folder, five times each:
+
+```console
+scripts\benchmark.bat configs\my_benchmark_folder
+```
+
+To submit a job for a slurm-cluster:
+
+```console
+# submit to partition GPU
+sbatch -p GPU scripts/sbatch_benchmark.sh
+
+# check queue
+squeue -u $USER
+
+# if you get a job id (e.g. 12345), inspect accounting (if enabled)
+sacct -j 12345 --format=JobID,State,ExitCode,MaxRSS,Elapsed
+
+# follow output
+tail -f logs/bench_12345.out
 ```
 
 ## Arguments for Configuration or the CLI
 
-| Argument | Description | Default value |
+Arguments can be provided on the CLI or inside a TOML config file. CLI flags always take precedence over the config file.
+
+### LaCAM / MAPF
+
+| Argument | Short | Description | Default |
+| --- | --- | --- | --- |
+| `--config-file` | `-c` | TOML config file to load settings from. | `configs/default_config.toml` |
+| `--map-file` | `-m` | Grid map file (`.map`) for the MAPF instance. | `assets/tunnel.map` |
+| `--scen-file` | `-i` | Scenario file (`.scen`) listing start/goal pairs. | `assets/tunnel.scen` |
+| `--num-agents` | `-N` | Number of agents to read from the scenario. | `4` |
+| `--verbose` | `-v` | Verbosity level for LaCAM logging. | `1` |
+| `--seed` | `-s` | Random seed for the LaCAM planner. | `0` |
+| `--time-limit-ms` | `-t` | Time limit in milliseconds per LaCAM solve. | `1000` |
+| `--flg-star` / `--no-flg-star` | | Use LaCAM* (optimal refinement) or vanilla LaCAM. | `True` |
+
+### Training
+
+| Argument | Description | Default |
 | --- | --- | --- |
-| `-c, --config-file` | TOML config to load pipeline settings from. | `configs/default_config.toml` |
-| `-m, --map-file` | Grid map file for the MAPF instance. | `assets/tunnel.map` |
-| `-i, --scen-file` | Scenario file listing start/goal pairs. | `assets/tunnel.scen` |
-| `-N, --num-agents` | Number of agents to read from the scenario. | `4` |
-| `-v, --verbose` | Verbosity level for logging. | `1` |
-| `-s, --seed` | Random seed for the LaCAM planner. | `0` |
-| `-t, --time-limit-ms` | Time limit (milliseconds) for the planner. | `1000` |
-| `--training-mode` | Choose between: 'model' (train with model-based solutions), 'lacam_only' (no training, just one LaCAM execution), and 'best' (take best solution from either LaCAM or model per epoch). | `model` |
-| `--model-file` | Pretrained distance table CNN checkpoint. If not provided, a new CNN model is created that is initially trained to always predict the max-distance (=map-size) | `None` |
-| `--epochs` | Training epochs for the distance table CNN. | `100` |
-| `--lr` | Learning rate for training the distance table CNN. | `0.001` |
-| `--device` | Compute device for training (e.g., `cpu`, `cuda`). | `cpu` |
-| `--output-dir` | Directory to store metrics and results. | `src/marl_path/output` |
-| `--seed-training` | Random seed for the model training run. | `0` |
-| `--flg-star, --no-flg-star` | Choose LaCAM* (default) or vanilla LaCAM. | `True` |
-| `--use-pretraining, --no-use-pretraining` | Pretrain the distance table model on map-size defaults before LaCAM training. | `False` |
-| `--use-neighbors, --no-use-neighbors` | Include neighboring cells in the loss computation. | `False` |
-| `--dist-table-record-mode` | Record distance tables during training: 0 none, 1 every 10 epochs, 2 only when model beats LaCAM, 3 every epoch, 4 every epoch but only one agent. | `0` |
-| `--goal-weight` | Weight of the loss value for the goal prediction, which has the target value 0. | `1.0` |
+| `--pipeline-mode` | `vdn`: train the heuristic CNN using VDN loss. `lacam-only`: run LaCAM once with no model training. | `vdn` |
+| `--feature-extractor-type` | Input encoding for the heuristic CNN. `basic`: map + goal + start channels (optionally + relative coordinates). `other_agents_channel`: `basic` + a binary channel marking all other agent goal positions. | `basic` |
+| `--model-file` | Path to a pretrained heuristic model checkpoint (`.pt`). If omitted a new model is created. | `None` |
+| `--model-initialization-mode` | `0`: random weight initialisation. `1`: pretrain on the default heuristic (max map dimension) before LaCAM training. | `0` |
+| `--epochs` | Number of training epochs. Each epoch solves one full MAPF instance. | `200` |
+| `--lr` | Learning rate for the heuristic CNN. | `0.001` |
+| `--device` | Compute device for training, e.g. `cpu`, `cuda`, or `auto`. | `cpu` |
+| `--seed-training` | Random seed for model training (weight init, data sampling). | `0` |
+
+### Recording & Output
+
+| Argument | Description | Default |
+| --- | --- | --- |
+| `--output-dir` | Directory to write metrics, model checkpoint, and logs. | `output/default_output` |
+| `--record-mode` | `0`: no output written. `1`: write metrics and model. | `1` |
+| `--record-num-agents` | Number of agents whose data is recorded. `0` records all agents. | `0` |
+| `--record-paths` | Whether to record agent paths during training. | `False` |
+| `--record-heuristics` | Whether to record the predicted heuristic tables during training. | `False` |
+| `--record-episode-interval` | Interval (in episodes) between recording snapshots. | `100` |
+| `--record-logs` | Whether to write a log file to `--output-dir`. | `True` |
 
 ## Visualizer
 
-The training results can be all seen in the visualizer. You can start it via:
+The training results can be explored in the visualizer. Start it with:
 
 ```console
 marl-vis
 ```
 
-This should start a webserver where you can explore the result of your training runs.
+This starts a local web server with four pages:
+
+| Page | Description |
+| --- | --- |
+| **Select data** | Browse the file system and select one or more training-output folders to load. |
+| **Training Results** | Per-epoch SOC, loss, and solve-time charts. Includes a summary statistics table with CSV export. |
+| **Heuristic History** | Animated heatmap of the predicted distance tables over training. |
+| **Benchmark Comparison** | Select variant folders (each containing multiple runs), compare them with side-by-side charts and a summary table. Includes CSV and Markdown report export. |

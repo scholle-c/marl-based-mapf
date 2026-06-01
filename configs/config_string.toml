@@ -6,7 +6,7 @@ verbose         = 1
 seed            = 1
 time_limit_ms   = 5000
 flg_star        = false
-training_mode   = "best"
+pipeline_mode   = "vdn"
 
 # RL training settings
 epochs          = 100

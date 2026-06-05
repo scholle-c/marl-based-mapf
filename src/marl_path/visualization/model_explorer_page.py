@@ -34,6 +34,27 @@ def _prefill_scen_path() -> str:
     return ""
 
 
+def _on_fill_agent_changed() -> None:
+    """on_change callback: push the selected agent's coords into the number-input keys."""
+    label = st.session_state.get("expl_fill_agent", "")
+    sc_starts = st.session_state.get("expl_sc_starts")
+    sc_goals = st.session_state.get("expl_sc_goals")
+    if not label or label == "— manual —" or sc_starts is None or sc_goals is None:
+        return
+    agent_labels = [
+        f"Agent {i}  ({s[0]},{s[1]}) → ({g[0]},{g[1]})"
+        for i, (s, g) in enumerate(zip(sc_starts, sc_goals))
+    ]
+    if label not in agent_labels:
+        return
+    idx = agent_labels.index(label)
+    s, g = sc_starts[idx], sc_goals[idx]
+    st.session_state["expl_start_row"] = int(s[0])
+    st.session_state["expl_start_col"] = int(s[1])
+    st.session_state["expl_goal_row"] = int(g[0])
+    st.session_state["expl_goal_col"] = int(g[1])
+
+
 def _auto_device() -> torch.device:
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -291,6 +312,19 @@ if grid is not None and model is not None:
     st.caption(f"Map: {H} × {W} — {int(grid.sum())} traversable cells")
 
     with st.expander("2  Query", expanded=True):
+        agent_labels: list[str] = []
+        if sc_starts is not None and sc_goals is not None:
+            agent_labels = [
+                f"Agent {i}  ({s[0]},{s[1]}) → ({g[0]},{g[1]})"
+                for i, (s, g) in enumerate(zip(sc_starts, sc_goals))
+            ]
+            st.selectbox(
+                "Fill start & goal from agent",
+                ["— manual —"] + agent_labels,
+                key="expl_fill_agent",
+                on_change=_on_fill_agent_changed,
+            )
+
         col_g, col_s = st.columns(2)
         with col_g:
             goal_row = st.number_input("Goal row", 0, H - 1, 0, key="expl_goal_row")
@@ -300,11 +334,8 @@ if grid is not None and model is not None:
             start_col = st.number_input("Start col", 0, W - 1, 0, key="expl_start_col")
 
         other_positions: list[tuple[int, int]] = []
-        if sc_starts is not None and sc_goals is not None:
-            agent_labels = [
-                f"Agent {i}  ({s[0]},{s[1]}) → ({g[0]},{g[1]})"
-                for i, (s, g) in enumerate(zip(sc_starts, sc_goals))
-            ]
+        if agent_labels:
+            assert sc_starts is not None
             chosen = st.multiselect(
                 "Other agents (from scenario)", agent_labels, key="expl_other_agents"
             )

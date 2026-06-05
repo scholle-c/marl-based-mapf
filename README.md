@@ -106,11 +106,13 @@ Arguments can be provided on the CLI or inside a TOML config file. CLI flags alw
 
 | Argument | Description | Default |
 | --- | --- | --- |
-| `--pipeline-mode` | `vdn`: train the heuristic CNN using VDN loss. `lacam-only`: run LaCAM once with no model training. | `vdn` |
+| `--pipeline-mode` | `vdn`: train the heuristic CNN using VDN loss. `expert_pretrain`: pretrain the heuristic model using solutions from an expert algorithm. `lacam_only`: run LaCAM once with no model training. | `vdn` |
+| `--training-mode` | Tensor/target computation strategy. `vdn`: VDN decomposition (sum agent values and targets). `individual`: individual agent path loss (concatenate per-agent values and targets). | `vdn` |
 | `--feature-extractor-type` | Input encoding for the heuristic CNN. `basic`: map + goal + start channels (optionally + relative coordinates). `other_agents_channel`: `basic` + a binary channel marking all other agent goal positions. | `basic` |
 | `--model-file` | Path to a pretrained heuristic model checkpoint (`.pt`). If omitted a new model is created. | `None` |
-| `--model-initialization-mode` | `0`: random weight initialisation. `1`: pretrain on the default heuristic (max map dimension) before LaCAM training. | `0` |
-| `--epochs` | Number of training epochs. Each epoch solves one full MAPF instance. | `200` |
+| `--model-initialization-mode` | `0`: random weight initialisation. `1`: pretrain on the default heuristic (max map dimension) before LaCAM training. `2`: pretrain on BFS distance tables. | `0` |
+| `--epochs` | Number of training epochs. Each epoch solves one full MAPF instance. | `10` |
+| `--batch-size` | Batch size for training the heuristic model. Each batch includes multiple (state, target) pairs collected from solving MAPF instances. | `128` |
 | `--lr` | Learning rate for the heuristic CNN. | `0.001` |
 | `--device` | Compute device for training, e.g. `cpu`, `cuda`, or `auto`. | `cpu` |
 | `--seed-training` | Random seed for model training (weight init, data sampling). | `0` |

@@ -1,11 +1,10 @@
-from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
 import torch
 from typing import Optional
 
-from marl_path.shared.mapf_utils import Coord, Grid, get_neighbors, is_valid_coord
+from marl_path.shared.mapf_utils import BfsCache, Coord, Grid, is_valid_coord
 from marl_path.model.definition import DefaultModel
 from marl_path.model.feature_extraction import FeatureExtractor, BasicExtractor
 
@@ -17,55 +16,36 @@ class DistTable:
     model: Optional[DefaultModel] = None
     device: torch.device | None = None
     extractor: Optional[FeatureExtractor] = None
+    input_tensor: Optional[torch.Tensor] = None
     other_agents: list[Coord] = field(default_factory=lambda: [])
-    has_model_generated: bool = field(init=False, default=False)
-    Q: deque = field(init=False)
-    table: np.ndarray = field(init=False)  # distance matrix
+    bfs_cache: BfsCache = field(kw_only=True, repr=False)
+    table: np.ndarray = field(init=False)  # distance heuristic (BFS)
+    delay: np.ndarray = field(init=False)  # delay matrix (model prediction)
     NIL: int = field(init=False)
 
     def __post_init__(self):
         if self.extractor is None:
             self.extractor = BasicExtractor()
         self.NIL = self.grid.size
-        self.Q = deque([self.goal])
-        self.table = np.full(self.grid.shape, self.NIL, dtype=int)
-        self.table[self.goal] = 0
+
+        self.table = self.bfs_cache[self.goal].copy()
+
+        self.delay = np.zeros(self.grid.shape, dtype=np.float32)
+        if self.model is not None:
+            self.delay = self.compute_delay_model(self.goal)
 
     def get(self, target: Coord) -> int:
-        # check valid input
         if not is_valid_coord(self.grid, target):
             return self.grid.size
+        return self.table[target] + self.delay[target]
 
-        # distance has been known
-        if self.table[target] < self.table.size or self.has_model_generated:
-            return self.table[target]
-
-        # compute distance table using either BFS or CNN model
-        if self.model is None:
-            return self.compute_table_bfs(target)
-        else:
-            self.has_model_generated = True
-            return self.compute_table_model(target)  # type: ignore
-
-    def compute_table_model(self, target: Coord) -> int:
-        self.input_tensor: torch.Tensor = self.extractor.extract(  # type: ignore[union-attr]
-            self.grid, self.goal, target, self.other_agents, device=self.device
+    def compute_delay_model(self, target: Coord) -> np.ndarray:
+        other_bfs = {g: self.bfs_cache[g] for g in self.other_agents}
+        self.input_tensor = self.extractor.extract(  # type: ignore[union-attr]
+            self.grid, self.goal, target, self.other_agents, device=self.device,
+            bfs_tables=other_bfs,
         )
         with torch.no_grad():
             output: torch.Tensor = self.model(self.input_tensor)  # type: ignore
-        dist_table: np.ndarray = output.squeeze(0).squeeze(0).cpu().numpy()
-        dist_value: float = dist_table[target]#dist_value: int = int(dist_table[target])
-        self.table = dist_table#.astype(int)
-        return dist_value  # type: ignore
-
-    def compute_table_bfs(self, target: Coord) -> int:
-        while len(self.Q) > 0:
-            u = self.Q.popleft()
-            d = int(self.table[u])
-            for v in get_neighbors(self.grid, u):
-                if d + 1 < self.table[v]:
-                    self.table[v] = d + 1
-                    self.Q.append(v)
-            if u == target:
-                return d
-        return self.NIL
+        delay: np.ndarray = output.squeeze(0).squeeze(0).cpu().numpy()
+        return delay  # type: ignore

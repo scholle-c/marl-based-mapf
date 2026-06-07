@@ -12,89 +12,43 @@ from marl_path.shared import Coord, get_neighbors
 from .feature_extraction import FeatureExtractor, BasicExtractor
 
 
-def compute_vdn_tensors(
+def compute_delay_tensors(
     model: Any,
     solution: Any,
     starts: Any,
-    goals: Any,
-    map: Any,
     device: torch.device,
-    extractor: FeatureExtractor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    num_agents = len(starts)
-    dist_tables = _batch_dist_tables(model, extractor, map, starts, goals, device)
-
-    target_q_tot: torch.Tensor = torch.zeros(
-        len(solution), dtype=torch.float32, device=device
-    )
-    values_q_tot = None
-
-    for agent_idx in range(num_agents):
-        path = [solution[t][agent_idx] for t in range(len(solution))]
-        agent_values = _get_via_coordinates(dist_tables[agent_idx], path)
-        agent_targets = _get_path_target(path)
-
-        target_q_tot += torch.tensor(agent_targets, dtype=torch.float32, device=device)
-        if values_q_tot is None:
-            values_q_tot = agent_values
-        else:
-            values_q_tot += agent_values
-
-    assert values_q_tot is not None
-    return values_q_tot, target_q_tot
-
-
-def compute_individual_tensors(
-    model: Any,
-    solution: Any,
-    starts: Any,
-    goals: Any,
-    map: Any,
-    device: torch.device,
-    extractor: FeatureExtractor,
+    bfs_tables: List[np.ndarray],
+    input_tensors: List[torch.Tensor],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Like compute_vdn_tensors but without VDN decomposition: each agent's
     predicted values and targets are concatenated rather than summed, so the
     loss is computed independently per agent per timestep."""
     num_agents = len(starts)
-    dist_tables = _batch_dist_tables(model, extractor, map, starts, goals, device)
+    delay_tables = _batch_delay_tables(model, input_tensors)
 
     all_values: list[torch.Tensor] = []
     all_targets: list[torch.Tensor] = []
 
     for agent_idx in range(num_agents):
         path = [solution[t][agent_idx] for t in range(len(solution))]
-        all_values.append(_get_via_coordinates(dist_tables[agent_idx], path))
+        predicted_delay = _get_via_coordinates(delay_tables[agent_idx], path)
+        bfs_distance = _get_via_coordinates(bfs_tables[agent_idx], path)
+        bfs_tensor = torch.tensor(bfs_distance, dtype=torch.float32, device=device)
+        values = predicted_delay + bfs_tensor
+        all_values.append(values)
         all_targets.append(
-            torch.tensor(_get_path_target(path), dtype=torch.float32, device=device)
+            torch.tensor(
+                _get_path_target_first_visit(path), dtype=torch.float32, device=device
+            )
         )
 
     return torch.cat(all_values), torch.cat(all_targets)
 
 
-def _batch_dist_tables(
-    model: Any,
-    extractor: FeatureExtractor,
-    map: Any,
-    starts: Any,
-    goals: Any,
-    device: torch.device,
-) -> torch.Tensor:
-    """Single batched forward pass for all agents, returns (num_agents, H, W)."""
-    num_agents = len(starts)
-    inputs = torch.cat(
-        [
-            extractor.extract(
-                map,
-                goals[i],
-                starts[i],
-                [goals[j] for j in range(num_agents) if j != i],
-                device=device,
-            )
-            for i in range(num_agents)
-        ]
-    )  # (num_agents, C, H, W)
-    return model(inputs).squeeze(1)  # (num_agents, H, W)
+def _batch_delay_tables(model: Any, input_tensors: List[torch.Tensor]) -> torch.Tensor:
+    """Single batched forward pass for all agents."""
+    batched = torch.cat(input_tensors, dim=0)  # (num_agents, C, H, W)
+    return model(batched).squeeze(1)  # (num_agents, H, W)
 
 
 def update_from_batch(
@@ -102,49 +56,41 @@ def update_from_batch(
     optimizer: Any,
     batch: List[Tuple[torch.Tensor, torch.Tensor]],
     loss_fn=torch.nn.functional.mse_loss,
+    weights: list[float] | None = None,
 ) -> float:
     if not batch:
         return float("nan")
     model.train()
     optimizer.zero_grad()
     total_loss = 0.0
+    i = 0
     for values, targets in batch:
         loss = loss_fn(values, targets)
+        if weights is not None:
+            loss = loss * weights[i]
         loss.backward()
         total_loss += loss.item()
+        i += 1
     optimizer.step()
     return total_loss / len(batch)
 
 
-def _get_path_target(path: Any) -> List[int]:
+def _get_path_target_first_visit(path: Any) -> List[int]:
     """
-    Determines the distance values for a given path of length > 0, where the agent
-    has reached its goal. Works like this:
-    1.) Iterate from goal to start, start with trgt = 0
-    2.) When the agent moved, add trgt++ to list of targets
-    3.) When the agent waited, add trgt to list of targets
-
-    Args:
-        path (Any): Path of the agent. len(path) must be greater than zero.
-
-    Returns:
-        List[int]: A list with distance-target values
+    Computes first-visit timestep targets for each cell on the path.
+    target(v) = total_path_length - t_first_visit(v)
     """
-    targets = [0]
-    trgt: int = 0
-    coord_prev = path[-1]
-    goal = path[-1]
-    for coord in reversed(path[:-1]):
-        if coord != coord_prev:
-            trgt += 1
+    total_length = len(path) - 1  # remaining steps from start
 
-        if coord == goal:
-            targets.append(0)
-        else:
-            targets.append(trgt)
+    first_visit: dict = {}
+    for t, coord in enumerate(path):
+        if coord not in first_visit:
+            first_visit[coord] = t
 
-        coord_prev = coord
-    targets.reverse()
+    targets = []
+    for coord in path:
+        targets.append(total_length - first_visit[coord])
+
     return targets
 
 

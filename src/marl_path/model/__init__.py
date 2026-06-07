@@ -2,8 +2,7 @@
 
 from .definition import DistanceTableCNN, DefaultModel
 from .training import (
-    compute_vdn_tensors,
-    compute_individual_tensors,
+    compute_delay_tensors,
     pretrain_on_default_value,
     update_from_batch,
     pretrain_on_bfs,
@@ -16,6 +15,7 @@ from .feature_extraction import (
     FeatureExtractor,
     BasicExtractor,
     OtherAgentsChannelExtractor,
+    BfsDistanceExtractor,
 )
 
 __all__ = [
@@ -25,8 +25,7 @@ __all__ = [
     "save_checkpoint",
     "build_input_tensor",
     "build_random_input_tensor",
-    "compute_vdn_tensors",
-    "compute_individual_tensors",
+    "compute_delay_tensors",
     "pretrain_on_default_value",
     "pretrain_on_bfs",
     "update_from_batch",
@@ -37,4 +36,5 @@ __all__ = [
     "FeatureExtractor",
     "BasicExtractor",
     "OtherAgentsChannelExtractor",
+    "BfsDistanceExtractor",
 ]

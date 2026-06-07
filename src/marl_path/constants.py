@@ -26,13 +26,11 @@ COMPARISON_ALGO_LACAM: str = "lacam"
 COMPARISON_ALGO_IMITATION_MODEL: str = "imitation_model"
 
 # Pipeline modes
-PIPELINE_MODE_VDN: str = "vdn"
-PIPELINE_MODE_EXPERT_PRETRAIN: str = "expert_pretrain"
+PIPELINE_MODE_DELAY_VS_EXPERT: str = "delay_vs_expert"
 PIPELINE_MODE_LACAM_ONLY: str = "lacam_only"
 
-# Training modes (tensor/target computation strategy)
-TRAINING_MODE_VDN: str = "vdn"
-TRAINING_MODE_INDIVIDUAL: str = "individual"
+# Training modes
+TRAINING_MODE_DELAY: str = "delay"
 
 # Extractor types
 EXTRACTOR_BASIC: str = "basic"

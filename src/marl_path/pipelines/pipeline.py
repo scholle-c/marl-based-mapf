@@ -4,16 +4,12 @@ from pathlib import Path
 from loguru import logger
 
 import marl_path.constants as consts
-from marl_path.model import compute_vdn_tensors, compute_individual_tensors
+from marl_path.model import compute_delay_tensors
 
 from .comparison import ComparisonPipeline
-from .expert_pretrain import ExpertAlgorithmPretrainingPipeline
-from .vdn import VDNPipeline
+from .delay_vs_expert import DelayVsExpertPipeline
 
-_TRAINING_MODE_FNS = {
-    consts.TRAINING_MODE_VDN: compute_vdn_tensors,
-    consts.TRAINING_MODE_INDIVIDUAL: compute_individual_tensors,
-}
+_TRAINING_MODE_FNS = {consts.TRAINING_MODE_DELAY: compute_delay_tensors}
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
@@ -36,10 +32,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
     logger.info("starting MARL-path pipeline in mode: {}", args.pipeline_mode)
     if args.pipeline_mode == consts.PIPELINE_MODE_LACAM_ONLY:
         pipeline = ComparisonPipeline(args, compute_tensors)
-    elif args.pipeline_mode == consts.PIPELINE_MODE_EXPERT_PRETRAIN:
-        pipeline = ExpertAlgorithmPretrainingPipeline(args, compute_tensors)
     else:
-        pipeline = VDNPipeline(args, compute_tensors)
+        pipeline = DelayVsExpertPipeline(args, compute_tensors)
 
     pipeline.run_model_training()
     pipeline.store_results()

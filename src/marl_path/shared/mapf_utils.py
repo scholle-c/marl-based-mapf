@@ -1,5 +1,6 @@
 import re
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias
@@ -8,6 +9,37 @@ import numpy as np
 
 Grid: TypeAlias = np.ndarray
 Coord: TypeAlias = tuple[int, int]  # y, x
+
+
+class BfsCache:
+    """Cache for BFS distance tables, mapping goal coordinates to their BFS tables."""
+
+    def __init__(self, grid: Grid):
+        self.grid = grid
+        self.cache: dict[Coord, np.ndarray] = {}
+        self.NIL = self.grid.size
+
+
+    def __contains__(self, goal: Coord) -> bool:
+        return goal in self.cache
+    
+    def __getitem__(self, goal: Coord) -> np.ndarray:
+        if goal not in self.cache:
+            self.compute_table_bfs(goal)
+        return self.cache[goal]
+    
+    def compute_table_bfs(self, goal: Coord) -> None:
+        Q = deque([goal])
+        table = np.full(self.grid.shape, self.NIL, dtype=np.float32)
+        table[goal] = 0
+        while len(Q) > 0:
+            u = Q.popleft()
+            d = int(table[u])
+            for v in get_neighbors(self.grid, u):
+                if d + 1 < table[v]:
+                    table[v] = d + 1
+                    Q.append(v)
+        self.cache[goal] = table    
 
 
 @dataclass

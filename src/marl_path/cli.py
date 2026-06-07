@@ -71,15 +71,15 @@ def main():
     parser.add_argument(
         "--pipeline-mode",
         type=str,
-        default="vdn",
-        help=f"Choose between: '{consts.PIPELINE_MODE_VDN}': train the heuristic model using VDN loss. '{consts.PIPELINE_MODE_EXPERT_PRETRAIN}': pretrain the heuristic model using solutions from an expert algorithm. '{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM once without any rl training or using a distance table CNN model.",
+        default=consts.PIPELINE_MODE_DELAY_VS_EXPERT,
+        help=f"Choose between: '{consts.PIPELINE_MODE_DELAY_VS_EXPERT}': train model to predict delay-based tensors using an expert algorithm (e.g., LaCAM) to generate training data, '{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM only without training the model and record the results for comparison.",
     )
 
     parser.add_argument(
         "--training-mode",
         type=str,
-        default=consts.TRAINING_MODE_VDN,
-        help=f"Tensor/target computation strategy. '{consts.TRAINING_MODE_VDN}': VDN decomposition (sum agent values and targets). '{consts.TRAINING_MODE_INDIVIDUAL}': individual agent path loss (concatenate per-agent values and targets).",
+        default=consts.TRAINING_MODE_DELAY,
+        help=f"Tensor/target computation strategy. '{consts.TRAINING_MODE_DELAY}': delay-based computation.",
     )
 
     parser.add_argument(

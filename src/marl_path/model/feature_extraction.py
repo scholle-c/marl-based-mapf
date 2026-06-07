@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Optional
 
 import numpy as np
 import torch
 
 from marl_path.shared import Grid
+
+BfsTableMap = dict[tuple[int, int], np.ndarray]
 
 
 class FeatureExtractor(ABC):
@@ -27,6 +30,7 @@ class FeatureExtractor(ABC):
         start: tuple[int, int],
         other_agents: list[tuple[int, int]],
         device: torch.device | None = None,
+        bfs_tables: Optional[BfsTableMap] = None,
     ) -> torch.Tensor:
         """Return a tensor of shape (1, n_channels, H, W)."""
         ...
@@ -66,6 +70,7 @@ class BasicExtractor(FeatureExtractor):
         start: tuple[int, int],
         other_agents: list[tuple[int, int]],
         device: torch.device | None = None,
+        bfs_tables: Optional[BfsTableMap] = None,
     ) -> torch.Tensor:
         map_ch = grid.astype(np.float32, copy=False)
         goal_ch = np.zeros_like(map_ch)
@@ -101,6 +106,7 @@ class OtherAgentsChannelExtractor(FeatureExtractor):
         start: tuple[int, int],
         other_agents: list[tuple[int, int]],
         device: torch.device | None = None,
+        bfs_tables: Optional[BfsTableMap] = None,
     ) -> torch.Tensor:
         map_ch = grid.astype(np.float32, copy=False)
         goal_ch = np.zeros_like(map_ch)
@@ -113,6 +119,59 @@ class OtherAgentsChannelExtractor(FeatureExtractor):
 
         tensor = torch.from_numpy(
             np.stack([map_ch, goal_ch, start_ch, agents_ch])
+        ).unsqueeze(0)
+        if device is not None:
+            tensor = tensor.to(device)
+        if self._use_coord_channels:
+            tensor = _add_relative_coords(tensor, goal)
+        return tensor
+
+
+class BfsDistanceExtractor(FeatureExtractor):
+    """BasicExtractor plus one channel per other agent containing their BFS distance map.
+
+    Other agents' BFS tables are summed into a single extra channel and
+    normalised by grid size so the values stay in a comparable range.
+    Channels: map, goal, start, summed_bfs [, y_rel, x_rel]
+
+    Falls back to the other-agents binary channel when bfs_tables is None.
+    """
+
+    def __init__(self, use_coord_channels: bool = True):
+        self._use_coord_channels = use_coord_channels
+
+    @property
+    def n_channels(self) -> int:
+        return 6 if self._use_coord_channels else 4
+
+    def extract(
+        self,
+        grid: Grid,
+        goal: tuple[int, int],
+        start: tuple[int, int],
+        other_agents: list[tuple[int, int]],
+        device: torch.device | None = None,
+        bfs_tables: Optional[BfsTableMap] = None,
+    ) -> torch.Tensor:
+        map_ch = grid.astype(np.float32, copy=False)
+        goal_ch = np.zeros_like(map_ch)
+        goal_ch[goal] = 1.0
+        start_ch = np.zeros_like(map_ch)
+        start_ch[start] = 1.0
+
+        if bfs_tables:
+            norm = float(grid.size) or 1.0
+            bfs_ch = sum(bfs_tables[g] for g in other_agents if g in bfs_tables)
+            if not isinstance(bfs_ch, np.ndarray):
+                bfs_ch = np.zeros_like(map_ch)
+            bfs_ch = (bfs_ch / norm).astype(np.float32)
+        else:
+            bfs_ch = np.zeros_like(map_ch)
+            for pos in other_agents:
+                bfs_ch[pos] = 1.0
+
+        tensor = torch.from_numpy(
+            np.stack([map_ch, goal_ch, start_ch, bfs_ch])
         ).unsqueeze(0)
         if device is not None:
             tensor = tensor.to(device)

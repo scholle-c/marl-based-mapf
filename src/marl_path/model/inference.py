@@ -9,7 +9,8 @@ from .definition import DefaultModel, DistanceTableCNN
 from .feature_extraction import (
     FeatureExtractor,
     BasicExtractor,
-    OtherAgentsChannelExtractor,
+    BinaryAgentsChannelExtractor,
+    AggregatedAgentsChannelExtractor,
 )
 import torch
 import numpy as np
@@ -103,6 +104,8 @@ def _extractor_from_config(config: dict | None) -> FeatureExtractor:
         return BasicExtractor()
     use_coord = config.get("use_coord_channels", True)
     cls_name = config.get("class", "BasicExtractor")
-    if cls_name == "OtherAgentsChannelExtractor":
-        return OtherAgentsChannelExtractor(use_coord_channels=use_coord)
+    if cls_name == "BinaryAgentsChannelExtractor":
+        return BinaryAgentsChannelExtractor(use_coord_channels=use_coord)
+    if cls_name == "AggregatedAgentsChannelExtractor":
+        return AggregatedAgentsChannelExtractor(use_coord_channels=use_coord)
     return BasicExtractor(use_coord_channels=use_coord)

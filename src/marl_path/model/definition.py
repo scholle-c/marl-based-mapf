@@ -7,6 +7,9 @@ from torch import nn
 from abc import ABC, abstractmethod
 
 
+DELAY_SCALE = 0.1  # scaling of delay so it dosnt dominate the heuristic
+
+
 class DefaultModel(nn.Module, ABC):
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -42,4 +45,4 @@ class DistanceTableCNN(DefaultModel):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass: (batch, 3, H, W) -> (batch, 1, H, W)."""
-        return self.network(x)
+        return torch.nn.functional.softplus(self.network(x)) * DELAY_SCALE

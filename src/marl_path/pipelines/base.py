@@ -19,7 +19,8 @@ from marl_path.model import (
     MAPFStats,
     BasicExtractor,
     FeatureExtractor,
-    OtherAgentsChannelExtractor,
+    BinaryAgentsChannelExtractor,
+    AggregatedAgentsChannelExtractor,
 )
 from marl_path.model.inference import save_checkpoint
 from marl_path.shared.mapf_utils import get_grid, get_scenario
@@ -148,8 +149,10 @@ def _initialize_model(
             torch.cuda.manual_seed_all(seed)
         np.random.seed(seed)
 
-    if extractor_type == consts.EXTRACTOR_OTHER_AGENTS_CHANNEL:
-        extractor = OtherAgentsChannelExtractor()
+    if extractor_type == consts.EXTRACTOR_BINARY_AGENTS_CHANNEL:
+        extractor = BinaryAgentsChannelExtractor()
+    elif extractor_type == consts.EXTRACTOR_AGGREGATED_AGENTS_CHANNEL:
+        extractor = AggregatedAgentsChannelExtractor()
     else:
         extractor = BasicExtractor()
 

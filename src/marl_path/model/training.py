@@ -71,6 +71,8 @@ def update_from_batch(
         loss.backward()
         total_loss += loss.item()
         i += 1
+    # If magnitude of gradients exceeds 1.0, gradients are scaled down to magnitude = 1.0. Should prevent bad updates pushing the model in a bad direction.
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
     return total_loss / len(batch)
 

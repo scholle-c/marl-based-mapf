@@ -86,7 +86,7 @@ def main():
         "--feature-extractor-type",
         type=str,
         default=consts.EXTRACTOR_BASIC,
-        help=f"type of feature extractor to use for the heuristic model. Choose between: {consts.EXTRACTOR_BASIC}: 3 channels (map, goal, start), {consts.EXTRACTOR_OTHER_AGENTS_CHANNEL}: basic + one binary channel marking all other agent positions",
+        help=f"type of feature extractor to use for the heuristic model. Choose between: {consts.EXTRACTOR_BASIC}: 3 channels (map, goal, start), {consts.EXTRACTOR_BINARY_AGENTS_CHANNEL}: basic + one binary channel marking all other agent positions, {consts.EXTRACTOR_AGGREGATED_AGENTS_CHANNEL}: basic + one aggregated channel of the other agents' bfs distance heuristic to the goal.",
     )
 
     parser.add_argument(

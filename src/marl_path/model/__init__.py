@@ -14,8 +14,8 @@ from .utils import build_input_tensor, build_random_input_tensor
 from .feature_extraction import (
     FeatureExtractor,
     BasicExtractor,
-    OtherAgentsChannelExtractor,
-    BfsDistanceExtractor,
+    BinaryAgentsChannelExtractor,
+    AggregatedAgentsChannelExtractor,
 )
 
 __all__ = [
@@ -35,6 +35,6 @@ __all__ = [
     "DistTableStats",
     "FeatureExtractor",
     "BasicExtractor",
-    "OtherAgentsChannelExtractor",
-    "BfsDistanceExtractor",
+    "BinaryAgentsChannelExtractor",
+    "AggregatedAgentsChannelExtractor",
 ]

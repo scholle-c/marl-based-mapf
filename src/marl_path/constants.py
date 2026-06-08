@@ -34,4 +34,5 @@ TRAINING_MODE_DELAY: str = "delay"
 
 # Extractor types
 EXTRACTOR_BASIC: str = "basic"
-EXTRACTOR_OTHER_AGENTS_CHANNEL: str = "other_agents_channel"
+EXTRACTOR_BINARY_AGENTS_CHANNEL: str = "binary_agents_channel"
+EXTRACTOR_AGGREGATED_AGENTS_CHANNEL: str = "aggregated_agents_channel"

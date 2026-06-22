@@ -4,6 +4,7 @@ Everything related to model training. Contains functions like updating the model
 
 from __future__ import annotations
 from collections import deque
+from dataclasses import dataclass
 from typing import Any, List, Tuple
 import torch
 import numpy as np
@@ -12,37 +13,81 @@ from marl_path.shared import Coord, get_neighbors
 from .feature_extraction import FeatureExtractor, BasicExtractor
 
 
-def compute_delay_tensors(
-    model: Any,
+@dataclass
+class DelayBatchItem:
+    """Raw data for one episode needed to recompute loss with gradients."""
+
+    input_tensors: List[torch.Tensor]
+    paths: List[List[Coord]]
+    bfs_distances: List[np.ndarray]
+    targets: torch.Tensor
+
+
+def prepare_delay_batch_item(
+    _model: Any,
     solution: Any,
     starts: Any,
     device: torch.device,
     bfs_tables: List[np.ndarray],
     input_tensors: List[torch.Tensor],
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Like compute_vdn_tensors but without VDN decomposition: each agent's
-    predicted values and targets are concatenated rather than summed, so the
-    loss is computed independently per agent per timestep."""
+) -> DelayBatchItem:
+    """Collect paths, BFS distances, and targets for one episode without running
+    a forward pass. The forward pass is deferred to update_delay_from_batch so
+    that computation graphs are not held across the entire batch accumulation."""
     num_agents = len(starts)
-    delay_tables = _batch_delay_tables(model, input_tensors)
-
-    all_values: list[torch.Tensor] = []
-    all_targets: list[torch.Tensor] = []
+    paths = []
+    bfs_distances = []
+    all_targets: list[float] = []
 
     for agent_idx in range(num_agents):
         path = [solution[t][agent_idx] for t in range(len(solution))]
-        predicted_delay = _get_via_coordinates(delay_tables[agent_idx], path)
-        bfs_distance = _get_via_coordinates(bfs_tables[agent_idx], path)
-        bfs_tensor = torch.tensor(bfs_distance, dtype=torch.float32, device=device)
-        values = predicted_delay + bfs_tensor
-        all_values.append(values)
-        all_targets.append(
-            torch.tensor(
-                _get_path_target_first_visit(path), dtype=torch.float32, device=device
-            )
-        )
+        paths.append(path)
+        bfs_distances.append(_get_via_coordinates(bfs_tables[agent_idx], path))
+        all_targets.extend(_get_path_target_first_visit(path))
 
-    return torch.cat(all_values), torch.cat(all_targets)
+    target_tensor = torch.tensor(all_targets, dtype=torch.float32, device=device)
+    return DelayBatchItem(input_tensors, paths, bfs_distances, target_tensor)
+
+
+def update_delay_from_batch(
+    model: Any,
+    optimizer: Any,
+    batch: List[DelayBatchItem],
+    loss_fn=torch.nn.functional.mse_loss,
+    weights: list[float] | None = None,
+) -> float:
+    """Recompute forward passes one episode at a time with gradients, backprop
+    immediately after each episode, then step the optimizer once. This keeps only
+    a single computation graph in memory rather than one per batch item."""
+    if not batch:
+        return float("nan")
+    model.train()
+    optimizer.zero_grad()
+    total_loss = 0.0
+
+    for i, item in enumerate(batch):
+        delay_tables = _batch_delay_tables(model, item.input_tensors)
+
+        all_values: list[torch.Tensor] = []
+        for agent_idx, (path, bfs_dist) in enumerate(
+            zip(item.paths, item.bfs_distances)
+        ):
+            predicted_delay = _get_via_coordinates(delay_tables[agent_idx], path)
+            bfs_tensor = torch.tensor(
+                bfs_dist, dtype=torch.float32, device=delay_tables.device
+            )
+            all_values.append(predicted_delay + bfs_tensor)
+
+        values = torch.cat(all_values)
+        loss = loss_fn(values, item.targets)
+        if weights is not None:
+            loss = loss * weights[i]
+        loss.backward()
+        total_loss += loss.item()
+
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    optimizer.step()
+    return total_loss / len(batch)
 
 
 def _batch_delay_tables(model: Any, input_tensors: List[torch.Tensor]) -> torch.Tensor:

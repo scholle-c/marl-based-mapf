@@ -4,12 +4,12 @@ from pathlib import Path
 from loguru import logger
 
 import marl_path.constants as consts
-from marl_path.model import compute_delay_tensors
+from marl_path.model import prepare_delay_batch_item
 
 from .comparison import ComparisonPipeline
 from .delay_vs_expert import DelayVsExpertPipeline
 
-_TRAINING_MODE_FNS = {consts.TRAINING_MODE_DELAY: compute_delay_tensors}
+_TRAINING_MODE_FNS = {consts.TRAINING_MODE_DELAY: prepare_delay_batch_item}
 
 
 def run_pipeline(args: argparse.Namespace) -> None:

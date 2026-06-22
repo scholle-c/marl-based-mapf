@@ -2,10 +2,12 @@
 
 from .definition import DistanceTableCNN, DefaultModel
 from .training import (
-    compute_delay_tensors,
+    prepare_delay_batch_item,
+    update_delay_from_batch,
     pretrain_on_default_value,
     update_from_batch,
     pretrain_on_bfs,
+    DelayBatchItem,
 )
 from .inference import load_model, save_checkpoint
 from .evaluation import get_soc
@@ -25,7 +27,9 @@ __all__ = [
     "save_checkpoint",
     "build_input_tensor",
     "build_random_input_tensor",
-    "compute_delay_tensors",
+    "prepare_delay_batch_item",
+    "update_delay_from_batch",
+    "DelayBatchItem",
     "pretrain_on_default_value",
     "pretrain_on_bfs",
     "update_from_batch",

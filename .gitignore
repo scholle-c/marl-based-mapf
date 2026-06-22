@@ -76,3 +76,6 @@ pyrightconfig.json
 
 # MacOS
 .DS_Store
+
+# Claude
+CLAUDE.md

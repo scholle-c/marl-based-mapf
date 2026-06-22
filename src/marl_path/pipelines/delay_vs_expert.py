@@ -4,7 +4,7 @@ from loguru import logger
 import numpy as np
 
 from marl_path.pycam import LaCAM
-from marl_path.model import get_soc, update_from_batch
+from marl_path.model import get_soc, update_delay_from_batch
 from marl_path.shared.mapf_utils import validate_mapf_solution
 
 from .base import DefaultTrainingPipeline
@@ -112,7 +112,7 @@ class DelayVsExpertPipeline(DefaultTrainingPipeline):
                 bfs_tables = [
                     dist_table.table for dist_table in model_planner.dist_tables
                 ]
-                values_delay, target_delay = self.compute_tensors(
+                batch_item = self.compute_tensors(
                     self.model,
                     solution,
                     self.starts,
@@ -120,7 +120,7 @@ class DelayVsExpertPipeline(DefaultTrainingPipeline):
                     bfs_tables=bfs_tables,
                     input_tensors=input_tensors,
                 )
-                batch.append((values_delay, target_delay))
+                batch.append(batch_item)
 
                 if running_mean is None:
                     running_mean = soc_expert
@@ -143,7 +143,7 @@ class DelayVsExpertPipeline(DefaultTrainingPipeline):
                     f"{no_solution_count} episodes in this epoch had no solution from the model."
                 )
 
-            mean_loss = update_from_batch(
+            mean_loss = update_delay_from_batch(
                 self.model, self.optimizer, batch, weights=weights
             )
             mean_soc_model = (

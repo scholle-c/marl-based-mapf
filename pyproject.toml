@@ -39,6 +39,7 @@ Repository = "https://github.com/scholle-c/marl-based-mapf"
 [project.scripts]
 marl-path = "marl_path.cli:main"
 marl-vis = "marl_path.visualization.cli:main"
+marl-generate = "marl_path.dataset.generate:main"
 
 
 [tool.setuptools]

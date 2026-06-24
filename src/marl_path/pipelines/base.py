@@ -1,12 +1,10 @@
 import argparse
-import random
-import os
 import json
+import os
+
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Callable
 from loguru import logger
 
 import marl_path.constants as consts
@@ -20,19 +18,15 @@ from marl_path.model import (
     MAPFStats,
     BasicExtractor,
     FeatureExtractor,
-    OtherAgentsChannelExtractor,
+    BinaryAgentsChannelExtractor,
+    AggregatedAgentsChannelExtractor,
 )
 from marl_path.model.inference import save_checkpoint
 from marl_path.shared.mapf_utils import get_grid, get_scenario
 
 
 class DefaultPipeline(ABC):
-    """
-    Abstract base class for the training pipeline. Defines the interface for running the pipeline and storing results.
-
-        Subclasses should implement the run_model_training and store_results methods to define specific training and evaluation logic.
-        Results of the pipeline: trained model for a heuristic distance prediction and training statistics
-    """
+    """Abstract base: loads a MAPF instance and defines the pipeline interface."""
 
     def __init__(self, args: argparse.Namespace):
         self.args = args
@@ -41,6 +35,11 @@ class DefaultPipeline(ABC):
         self._load_mapf_instance()
 
     def _load_mapf_instance(self) -> None:
+        map_file = getattr(self.args, "map_file", None)
+        scen_file = getattr(self.args, "scen_file", None)
+        if map_file is None or scen_file is None:
+            self.grid = self.starts = self.goals = None
+            return
         self.grid = get_grid(self.args.map_file)
         self.starts, self.goals = get_scenario(
             self.args.scen_file, self.args.num_agents
@@ -56,15 +55,10 @@ class DefaultPipeline(ABC):
 
 
 class DefaultTrainingPipeline(DefaultPipeline):
-    """
-    A default implementation of the training pipeline that can be used as a base for specific training approaches.
+    """Base for training pipelines: initializes model, extractor, optimizer, and stats."""
 
-    This class provides a structure for loading the MAPF instance, initializing the model, and defining the interface for running the training loop and storing results. Subclasses can override the run_model_training and store_results methods to implement specific training logic and result handling.
-    """
-
-    def __init__(self, args: argparse.Namespace, compute_tensors: Callable):
+    def __init__(self, args: argparse.Namespace):
         super().__init__(args)
-        self.compute_tensors = compute_tensors
         self.device: torch.device = _get_device(self.args.device)
         self.model, self.extractor = _initialize_model(
             self.args.model_file,
@@ -78,30 +72,26 @@ class DefaultTrainingPipeline(DefaultPipeline):
             training_mode=self.args.pipeline_mode,
             used_device=self.device.type,
             used_seed=getattr(self.args, "seed_training", None),
-            mapf=MAPFStats(map_size=self.grid.shape, num_agents=self.args.num_agents),
+            mapf=MAPFStats(
+                map_size=self.grid.shape if self.grid is not None else None,
+                num_agents=self.args.num_agents,
+            ),
         )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr)
-        self.random_seed_gen = random.Random(self.args.seed)
-        self._start_coverage = np.zeros(self.grid.shape, dtype=np.int32)
-        self._goal_coverage = np.zeros(self.grid.shape, dtype=np.int32)
-
-    def _record_coverage(self) -> None:
-        for s, g in zip(self.starts.positions, self.goals.positions):
-            self._start_coverage[s] += 1
-            self._goal_coverage[g] += 1
 
     def store_results(self) -> None:
         if self.args.record_mode != 0:
             os.makedirs(self.args.output_dir, exist_ok=True)
-            # Model saving
             model_path = os.path.join(
                 self.args.output_dir, consts.DEFAULT_FILENAME_TRAINED_MODEL
             )
             save_checkpoint(self.model, self.extractor, model_path)
-            # Training stats saving
-            map_mask = get_grid(self.args.map_file)
+            map_mask = (
+                get_grid(self.args.map_file)
+                if getattr(self.args, "map_file", None)
+                else None
+            )
             self.training_stats.save(self.args.output_dir, map_mask=map_mask)
-            # Arguments saving
             args_path = os.path.join(
                 self.args.output_dir, consts.DEFAULT_FILENAME_USED_CONFIG
             )
@@ -111,22 +101,6 @@ class DefaultTrainingPipeline(DefaultPipeline):
             }
             with open(args_path, "w") as f:
                 json.dump(data, f, indent=4)
-            np.savetxt(
-                os.path.join(
-                    self.args.output_dir, consts.DEFAULT_FILENAME_START_COVERAGE
-                ),
-                self._start_coverage,
-                delimiter=",",
-                fmt="%d",
-            )
-            np.savetxt(
-                os.path.join(
-                    self.args.output_dir, consts.DEFAULT_FILENAME_GOAL_COVERAGE
-                ),
-                self._goal_coverage,
-                delimiter=",",
-                fmt="%d",
-            )
             logger.info(
                 "Saved trained model and training stats to {}", self.args.output_dir
             )
@@ -149,8 +123,10 @@ def _initialize_model(
             torch.cuda.manual_seed_all(seed)
         np.random.seed(seed)
 
-    if extractor_type == consts.EXTRACTOR_OTHER_AGENTS_CHANNEL:
-        extractor = OtherAgentsChannelExtractor()
+    if extractor_type == consts.EXTRACTOR_BINARY_AGENTS_CHANNEL:
+        extractor = BinaryAgentsChannelExtractor()
+    elif extractor_type == consts.EXTRACTOR_AGGREGATED_AGENTS_CHANNEL:
+        extractor = AggregatedAgentsChannelExtractor()
     else:
         extractor = BasicExtractor()
 
@@ -212,13 +188,3 @@ def _get_device(device_str: str) -> torch.device:
             return torch.device("cpu")
 
     raise ValueError(f"Unknown device string: {device_str}")
-
-
-def _record_empty_epoch(
-    training_stats: TrainingStats,
-    dist_tables_model: list | None = None,
-) -> None:
-    logger.info("No solution found this epoch.")
-    training_stats.record_epoch(loss=None, soc=None)
-    if dist_tables_model is not None:
-        training_stats.record_dist_tables(model_tables=dist_tables_model)

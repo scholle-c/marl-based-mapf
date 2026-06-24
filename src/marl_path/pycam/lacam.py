@@ -8,7 +8,7 @@ from loguru import logger
 from typing import Optional
 import torch
 
-from .dist_table import DistTable
+from .dist_table import BfsCache, DistTable
 from marl_path.shared.mapf_utils import (
     Config,
     Configs,
@@ -95,11 +95,17 @@ class LaCAM:
     def _solve(self) -> Configs:
         self.info(1, "start solving MAPF")
 
-        # set distance tables
+        # set distance tables — share one BfsCache so each goal's BFS is computed once
+        self.bfs_cache: BfsCache = BfsCache(self.grid)
         self.dist_tables: list[DistTable] = []
         for g in self.goals:
             other_agents = [gg for gg in self.goals if gg != g]
-            self.dist_tables.append(DistTable(self.grid, g, model=self.model, device=self.device, extractor=self.extractor, other_agents=other_agents))
+            self.dist_tables.append(DistTable(
+                self.grid, g,
+                model=self.model, device=self.device,
+                extractor=self.extractor, other_agents=other_agents,
+                bfs_cache=self.bfs_cache,
+            ))
         self.pibt = PIBT(self.dist_tables)
 
         # set search scheme

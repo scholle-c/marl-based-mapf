@@ -6,21 +6,28 @@ from . import constants as consts
 
 
 def _dev_path(*parts: str) -> Path | None:
-    """Return a path relative to the project root only if it actually exists.
+    """Return a path relative to the project root only if it actually exists."""
+    candidate = Path(__file__).parent.parent.parent.joinpath(*parts)
+    return candidate if candidate.is_file() else None
 
-    Works in an editable/dev install where the source tree is present next to
-    the package.  Returns None when installed as a regular package (e.g. inside
-    a venv on a server) so that argparse falls back to requiring the user to
-    supply the value explicitly.
-    """
+
+def _dev_dir(*parts: str) -> Path | None:
+    """Return a directory relative to the project root only if it actually exists."""
+    candidate = Path(__file__).parent.parent.parent.joinpath(*parts)
+    return candidate if candidate.is_dir() else None
+
+
+def _dev_file(*parts: str) -> Path | None:
+    """Return a file relative to the project root only if it actually exists."""
     candidate = Path(__file__).parent.parent.parent.joinpath(*parts)
     return candidate if candidate.is_file() else None
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="MARL-path: supervised heuristic learning for MAPF."
+    )
 
-    # ======== Arguments for PyLaCAM ========
     parser.add_argument(
         "-c",
         "--config-file",
@@ -28,20 +35,50 @@ def main():
         default=_dev_path("configs", "default_config.toml"),
     )
 
+    # ── Pipeline mode ───────────────────────────────────────────────────────
+    parser.add_argument(
+        "--pipeline-mode",
+        type=str,
+        default=consts.PIPELINE_MODE_SUPERVISED_DELAY,
+        choices=[
+            consts.PIPELINE_MODE_SUPERVISED_DELAY,
+            consts.PIPELINE_MODE_LACAM_ONLY,
+        ],
+        help=(
+            f"'{consts.PIPELINE_MODE_SUPERVISED_DELAY}': train model on CBS-optimal dataset. "
+            f"'{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM baseline only."
+        ),
+    )
+
+    # ── Dataset (supervised_delay mode) ────────────────────────────────────
+    parser.add_argument(
+        "--dataset-dir",
+        type=Path,
+        default=None,
+        help="Directory of .npz files produced by marl-generate. Required for supervised_delay.",
+    )
+    parser.add_argument(
+        "--val-split",
+        type=float,
+        default=0.1,
+        help="Fraction of dataset instances used for validation (default: 0.1).",
+    )
+
+    # ── MAPF instance (required for lacam_only; optional eval for supervised_delay) ──
     parser.add_argument(
         "-m",
         "--map-file",
         type=Path,
         default=_dev_path("assets", "tunnel.map"),
+        help="Path to the .map file. Used for Track B eval in supervised mode and required for lacam_only.",
     )
-
     parser.add_argument(
         "-i",
         "--scen-file",
         type=Path,
         default=_dev_path("assets", "tunnel.scen"),
+        help="Path to the .scen file.",
     )
-
     parser.add_argument(
         "-N",
         "--num-agents",
@@ -49,152 +86,105 @@ def main():
         default=4,
     )
 
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        type=int,
-        default=1,
-    )
-
+    # ── LaCAM solver settings ───────────────────────────────────────────────
+    parser.add_argument("-v", "--verbose", type=int, default=0)
     parser.add_argument(
         "--flg-star",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="choose LaCAM* (default) or vanilla LaCAM",
+        help="Use LaCAM* (default) or vanilla LaCAM.",
     )
-
     parser.add_argument("-s", "--seed", type=int, default=0)
-
-    parser.add_argument("-t", "--time-limit-ms", type=int, default=1000)
-
-    # ======== Arguments for training the distance table predictor ========
+    parser.add_argument("-t", "--time-limit-ms", type=int, default=3000)
     parser.add_argument(
-        "--pipeline-mode",
-        type=str,
-        default="vdn",
-        help=f"Choose between: '{consts.PIPELINE_MODE_VDN}': train the heuristic model using VDN loss. '{consts.PIPELINE_MODE_EXPERT_PRETRAIN}': pretrain the heuristic model using solutions from an expert algorithm. '{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM once without any rl training or using a distance table CNN model.",
+        "--cbs-binary",
+        type=Path,
+        default=_dev_file("CBSH2-RTC", "cbs"),
+        help="Path to the CBS (CBSH2-RTC) binary used for optimal-gap reporting.",
     )
 
+    # ── Training hyperparameters ────────────────────────────────────────────
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument(
-        "--training-mode",
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Number of dataset instances per gradient step.",
+    )
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument(
+        "--device",
         type=str,
-        default=consts.TRAINING_MODE_VDN,
-        help=f"Tensor/target computation strategy. '{consts.TRAINING_MODE_VDN}': VDN decomposition (sum agent values and targets). '{consts.TRAINING_MODE_INDIVIDUAL}': individual agent path loss (concatenate per-agent values and targets).",
+        default="auto",
+        help="Device for training: 'cpu', 'cuda', 'mps', or 'auto'.",
+    )
+    parser.add_argument(
+        "--eval-interval",
+        type=int,
+        default=5,
+        help="Run Track B (LaCAM SOC) eval every N epochs (default: 5).",
+    )
+    parser.add_argument(
+        "--eval-seeds",
+        type=int,
+        default=5,
+        help="Number of LaCAM runs per Track B eval to average SOC over (default: 5).",
     )
 
+    # ── Model initialisation ────────────────────────────────────────────────
     parser.add_argument(
         "--feature-extractor-type",
         type=str,
         default=consts.EXTRACTOR_BASIC,
-        help=f"type of feature extractor to use for the heuristic model. Choose between: {consts.EXTRACTOR_BASIC}: 3 channels (map, goal, start), {consts.EXTRACTOR_OTHER_AGENTS_CHANNEL}: basic + one binary channel marking all other agent positions",
+        choices=[
+            consts.EXTRACTOR_BASIC,
+            consts.EXTRACTOR_BINARY_AGENTS_CHANNEL,
+            consts.EXTRACTOR_AGGREGATED_AGENTS_CHANNEL,
+        ],
     )
-
     parser.add_argument(
         "--model-file",
         type=Path,
         default=None,
-        help="path to a pretrained heuristic model",
+        help="Path to a pretrained model checkpoint to continue training from.",
     )
-
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=10,
-        help="number of training epochs for the heuristic model. Each epoch includes the solutions of the size of the batch.",
-    )
-
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=128,
-        help="batch size for training the heuristic model. Each batch includes multiple (state, target) pairs collected from solving mapf instances.",
-    )
-
     parser.add_argument(
         "--model-initialization-mode",
         type=int,
         default=0,
-        help="mode for initializing the heuristic model. 0: random initialization, 1: pretrain on default value max map size (= width + height), 2: pretrain on BFS distance tables",
+        help="0: random init, 1: pretrain on constant, 2: pretrain on BFS.",
     )
+    parser.add_argument("--seed-training", type=int, default=0)
 
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=0.001,
-        help="learning rate for training the heuristic model.",
-    )
-
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="device to use for training the heuristic model (e.g., 'cpu' or 'cuda').",
-    )
-
+    # ── Output ──────────────────────────────────────────────────────────────
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("output") / "default_output",
-        help="path to save metrics and results of the training and evaluation.",
     )
-
-    parser.add_argument(
-        "--seed-training",
-        type=int,
-        default=0,
-        help="random seed for training the heuristic model.",
-    )
-
-    # ======== Arguments the visualization afterwards ========
     parser.add_argument(
         "--record-mode",
         type=int,
         default=1,
-        help="mode for recording training process. 0: no recording",
+        help="0: no output, 1: save model + metrics.",
     )
 
-    parser.add_argument(
-        "--record-num-agents",
-        type=int,
-        default=0,
-        help="number of agents to record during training. 0: record all agents",
-    )
-
-    parser.add_argument(
-        "--record-paths",
-        type=bool,
-        default=False,
-        help="whether to record the paths of agents during training. 0: do not record, 1: record paths",
-    )
-
-    parser.add_argument(
-        "--record-heuristics",
-        type=bool,
-        default=False,
-        help="whether to record the heuristics of agents during training. 0: do not record, 1: record heuristics",
-    )
-
-    parser.add_argument(
-        "--record-episode-interval",
-        type=int,
-        default=100,
-        help="interval (in episodes) at which to record training metrics and results.",
-    )
-
-    parser.add_argument(
-        "--record-logs",
-        type=bool,
-        default=True,
-        help="whether to record the logs of training. 0: do not record, 1: record logs",
-    )
-
-    # Load config as defaults so explicit CLI args can still override them.
+    # Load config file defaults before final parse.
     first_pass, _ = parser.parse_known_args()
     if first_pass.config_file is not None:
         config = load_config(first_pass.config_file)
         parser.set_defaults(**config)
 
     args = parser.parse_args()
+
+    # ── Validate mode-specific requirements ────────────────────────────────
+    if args.pipeline_mode == consts.PIPELINE_MODE_SUPERVISED_DELAY:
+        if args.dataset_dir is None:
+            parser.error("--dataset-dir is required for supervised_delay mode.")
+    elif args.pipeline_mode == consts.PIPELINE_MODE_LACAM_ONLY:
+        if args.map_file is None or args.scen_file is None:
+            parser.error("--map-file and --scen-file are required for lacam_only mode.")
+
     run_pipeline(args)
 
 

@@ -1,17 +1,32 @@
-# LaCAM settings
-map_file        = "./assets/tunnel.map"
-scen_file       = "./assets/tunnel.scen"
-num_agents      = 4
-verbose         = 1
+# LaCAM / eval settings (Track B)
+map_file        = "./assets/random-32-32-20.map"
+scen_file       = "./assets/random-32-32-20_map-scen-random/scen-random/random-32-32-20-random-1.scen"
+num_agents      = 10
+verbose         = 0
 seed            = 1
 time_limit_ms   = 5000
-flg_star        = false
-pipeline_mode   = "vdn"
+flg_star        = true
 
-# RL training settings
-epochs          = 5
-batch_size      = 64
+# Pipeline
+pipeline_mode   = "supervised_delay"
+
+# Dataset
+dataset_dir     = "./data/random-32-32-20"
+val_split       = 0.1
+
+# Training
+epochs          = 10
+batch_size      = 4
 lr              = 1e-3
-device          = "mps"
-output_dir      = "./output/default_output"
+device          = "auto"
 seed_training   = 1
+feature_extractor_type = "aggregated_agents_channel"
+model_initialization_mode = 0
+
+# Track B eval frequency
+eval_interval   = 2
+eval_seeds      = 3
+
+# Output
+output_dir      = "./output/default_output"
+record_mode     = 1

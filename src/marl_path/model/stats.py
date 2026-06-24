@@ -130,6 +130,7 @@ class TrainingStats:
 
     _epoch_count: int = field(default=0, repr=False)
     _losses: List[float | None] = field(default_factory=list, repr=False)
+    _val_losses: List[float | None] = field(default_factory=list, repr=False)
 
     # ------------------------------------------------------------------ #
     # Recording                                                            #
@@ -140,10 +141,12 @@ class TrainingStats:
         loss: float | None,
         soc: int | float | None = None,
         elapsed_time: float | None = None,
+        val_loss: float | None = None,
     ) -> None:
         """Record scalar metrics for one training epoch."""
         self._epoch_count += 1
         self._losses.append(loss)
+        self._val_losses.append(val_loss)
         if self.mapf is not None:
             self.mapf.socs.append(soc)
             self.mapf.elapsed_times.append(elapsed_time)
@@ -194,7 +197,11 @@ class TrainingStats:
             and len(self.dist_tables._diffs) == self._epoch_count
         )
         has_elapsed = len(elapsed_times) == self._epoch_count
-        fieldnames = ["epoch", "loss", "soc"]
+        has_val_loss = any(v is not None for v in self._val_losses)
+        fieldnames = ["epoch", "loss"]
+        if has_val_loss:
+            fieldnames.append("val_loss")
+        fieldnames.append("soc")
         if has_elapsed:
             fieldnames.append("elapsed_time_ms")
         if has_diffs:
@@ -209,6 +216,10 @@ class TrainingStats:
                     "loss": self._losses[i],
                     "soc": socs[i] if i < len(socs) else None,
                 }
+                if has_val_loss:
+                    row["val_loss"] = (
+                        self._val_losses[i] if i < len(self._val_losses) else None
+                    )
                 if has_elapsed:
                     row["elapsed_time_ms"] = elapsed_times[i]
                 if has_diffs:

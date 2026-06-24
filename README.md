@@ -85,6 +85,61 @@ sacct -j 12345 --format=JobID,State,ExitCode,MaxRSS,Elapsed
 tail -f logs/bench_12345.out
 ```
 
+## Dataset Generation
+
+The supervised training pipeline requires a pre-generated dataset of near-optimal MAPF solutions.
+Solutions are produced by [EECBS](https://github.com/Jiaoyang-Li/EECBS) and cached to disk as `.npz` files for reuse across training runs.
+
+### Prerequisites
+
+Build EECBS and note the path to the binary:
+
+```console
+git clone https://github.com/Jiaoyang-Li/EECBS.git
+cd EECBS && cmake -DCMAKE_BUILD_TYPE=Release . && make
+```
+
+By default `marl-generate` looks for the binary at `../EECBS/eecbs` relative to the repo root.
+
+### Generating a dataset
+
+```console
+marl-generate \
+    --map-file assets/random-32-32-20.map \
+    --scen-dir assets/random-32-32-20_map-scen-random/scen-random \
+    --output-dir data/random-32-32-20 \
+    --num-agents 30 \
+    --subsets-per-scen 5 \
+    --timeout 60 \
+    --suboptimality 1.2
+```
+
+| Argument | Description | Default |
+| --- | --- | --- |
+| `--eecbs-binary` | Path to the EECBS binary. | `../EECBS/eecbs` |
+| `--map-file` | Grid map file (`.map`). | required |
+| `--scen-dir` | Directory containing `.scen` files (all `*.scen` files are used). | required |
+| `--output-dir` | Directory to write cached `.npz` instance files. | required |
+| `--num-agents` | Number of agents per instance. | `30` |
+| `--subsets-per-scen` | Agent subsets to generate per scen file. Subset 0 uses the first `num-agents` rows; subsequent subsets are random draws. | `1` |
+| `--timeout` | EECBS timeout per instance in seconds. | `60` |
+| `--suboptimality` | Suboptimality bound for EECBS (1.0 = optimal, higher = faster). | `1.2` |
+| `--seed` | Base random seed for agent subset sampling. | `0` |
+
+### Output and quality check
+
+After generation, the tool prints a summary:
+
+```
+Done: 25/25 instances saved (0 timeouts)
+Delay distribution: 1842/9120 path cells have non-zero delay (20.2%)
+```
+
+If fewer than 5 % of path cells have non-zero delay the dataset is delay-poor and the model will learn nothing useful.
+In that case, switch to a denser map or increase `--subsets-per-scen` to include more interacting agent configurations.
+
+Scenario files for standard benchmarks are available at the [Moving AI MAPF Benchmarks](https://movingai.com/benchmarks/mapf/index.html).
+
 ## Arguments for Configuration or the CLI
 
 Arguments can be provided on the CLI or inside a TOML config file. CLI flags always take precedence over the config file.

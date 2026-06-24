@@ -4,12 +4,9 @@ from pathlib import Path
 from loguru import logger
 
 import marl_path.constants as consts
-from marl_path.model import prepare_delay_batch_item
 
 from .comparison import ComparisonPipeline
-from .delay_vs_expert import DelayVsExpertPipeline
-
-_TRAINING_MODE_FNS = {consts.TRAINING_MODE_DELAY: prepare_delay_batch_item}
+from .supervised_delay import SupervisedDelayPipeline
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
@@ -21,19 +18,18 @@ def run_pipeline(args: argparse.Namespace) -> None:
             format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
         )
 
-    compute_tensors = _TRAINING_MODE_FNS.get(args.training_mode)
-    if compute_tensors is None:
-        raise ValueError(
-            f"Unknown training mode '{args.training_mode}'. "
-            f"Choose from: {list(_TRAINING_MODE_FNS)}"
-        )
-
     logger.info("MARL-path pipeline started with arguments: {}", args)
-    logger.info("starting MARL-path pipeline in mode: {}", args.pipeline_mode)
+    logger.info("Pipeline mode: {}", args.pipeline_mode)
+
     if args.pipeline_mode == consts.PIPELINE_MODE_LACAM_ONLY:
-        pipeline = ComparisonPipeline(args, compute_tensors)
+        pipeline = ComparisonPipeline(args)
+    elif args.pipeline_mode == consts.PIPELINE_MODE_SUPERVISED_DELAY:
+        pipeline = SupervisedDelayPipeline(args)
     else:
-        pipeline = DelayVsExpertPipeline(args, compute_tensors)
+        raise ValueError(
+            f"Unknown pipeline mode '{args.pipeline_mode}'. "
+            f"Choose from: {consts.PIPELINE_MODE_SUPERVISED_DELAY}, {consts.PIPELINE_MODE_LACAM_ONLY}"
+        )
 
     pipeline.run_model_training()
     pipeline.store_results()

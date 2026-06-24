@@ -26,11 +26,8 @@ COMPARISON_ALGO_LACAM: str = "lacam"
 COMPARISON_ALGO_IMITATION_MODEL: str = "imitation_model"
 
 # Pipeline modes
-PIPELINE_MODE_DELAY_VS_EXPERT: str = "delay_vs_expert"
+PIPELINE_MODE_SUPERVISED_DELAY: str = "supervised_delay"
 PIPELINE_MODE_LACAM_ONLY: str = "lacam_only"
-
-# Training modes
-TRAINING_MODE_DELAY: str = "delay"
 
 # Extractor types
 EXTRACTOR_BASIC: str = "basic"

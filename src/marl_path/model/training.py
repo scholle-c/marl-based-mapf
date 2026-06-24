@@ -1,11 +1,9 @@
-"""
-Everything related to model training. Contains functions like updating the model weights.
-"""
+"""Model training utilities."""
 
 from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, List, Tuple
+from typing import Any, List, Sequence
 import torch
 import numpy as np
 
@@ -15,7 +13,7 @@ from .feature_extraction import FeatureExtractor, BasicExtractor
 
 @dataclass
 class DelayBatchItem:
-    """Raw data for one episode needed to recompute loss with gradients."""
+    """Raw data for one episode needed to compute loss with gradients."""
 
     input_tensors: List[torch.Tensor]
     paths: List[List[Coord]]
@@ -52,20 +50,18 @@ def prepare_delay_batch_item(
 def update_delay_from_batch(
     model: Any,
     optimizer: Any,
-    batch: List[DelayBatchItem],
+    batch: Sequence[DelayBatchItem],
     loss_fn=torch.nn.functional.mse_loss,
-    weights: list[float] | None = None,
 ) -> float:
-    """Recompute forward passes one episode at a time with gradients, backprop
-    immediately after each episode, then step the optimizer once. This keeps only
-    a single computation graph in memory rather than one per batch item."""
+    """Recompute forward passes with gradients for each item in the batch,
+    accumulate gradients, then step the optimizer once."""
     if not batch:
         return float("nan")
     model.train()
     optimizer.zero_grad()
     total_loss = 0.0
 
-    for i, item in enumerate(batch):
+    for item in batch:
         delay_tables = _batch_delay_tables(model, item.input_tensors)
 
         all_values: list[torch.Tensor] = []
@@ -80,13 +76,38 @@ def update_delay_from_batch(
 
         values = torch.cat(all_values)
         loss = loss_fn(values, item.targets)
-        if weights is not None:
-            loss = loss * weights[i]
         loss.backward()
         total_loss += loss.item()
 
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
+    return total_loss / len(batch)
+
+
+def eval_delay_loss(
+    model: Any,
+    batch: Sequence[DelayBatchItem],
+    loss_fn=torch.nn.functional.mse_loss,
+) -> float:
+    """Compute mean loss over a batch without updating model weights."""
+    if not batch:
+        return float("nan")
+    model.eval()
+    total_loss = 0.0
+    with torch.no_grad():
+        for item in batch:
+            delay_tables = _batch_delay_tables(model, item.input_tensors)
+            all_values: list[torch.Tensor] = []
+            for agent_idx, (path, bfs_dist) in enumerate(
+                zip(item.paths, item.bfs_distances)
+            ):
+                predicted_delay = _get_via_coordinates(delay_tables[agent_idx], path)
+                bfs_tensor = torch.tensor(
+                    bfs_dist, dtype=torch.float32, device=delay_tables.device
+                )
+                all_values.append(predicted_delay + bfs_tensor)
+            values = torch.cat(all_values)
+            total_loss += loss_fn(values, item.targets).item()
     return total_loss / len(batch)
 
 
@@ -96,38 +117,11 @@ def _batch_delay_tables(model: Any, input_tensors: List[torch.Tensor]) -> torch.
     return model(batched).squeeze(1)  # (num_agents, H, W)
 
 
-def update_from_batch(
-    model: Any,
-    optimizer: Any,
-    batch: List[Tuple[torch.Tensor, torch.Tensor]],
-    loss_fn=torch.nn.functional.mse_loss,
-    weights: list[float] | None = None,
-) -> float:
-    if not batch:
-        return float("nan")
-    model.train()
-    optimizer.zero_grad()
-    total_loss = 0.0
-    i = 0
-    for values, targets in batch:
-        loss = loss_fn(values, targets)
-        if weights is not None:
-            loss = loss * weights[i]
-        loss.backward()
-        total_loss += loss.item()
-        i += 1
-    # If magnitude of gradients exceeds 1.0, gradients are scaled down to magnitude = 1.0. Should prevent bad updates pushing the model in a bad direction.
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    optimizer.step()
-    return total_loss / len(batch)
-
-
 def _get_path_target_first_visit(path: Any) -> List[int]:
-    """
-    Computes first-visit timestep targets for each cell on the path.
+    """Computes first-visit timestep targets for each cell on the path.
     target(v) = total_path_length - t_first_visit(v)
     """
-    total_length = len(path) - 1  # remaining steps from start
+    total_length = len(path) - 1
 
     first_visit: dict = {}
     for t, coord in enumerate(path):
@@ -142,17 +136,7 @@ def _get_path_target_first_visit(path: Any) -> List[int]:
 
 
 def _get_via_coordinates(arr: Any, coords: List[Coord]) -> Any:
-    """
-    Accesses the elements of an 2D numpy array via a list of 2D coordinates in the
-    shape [(column, row), ...].
-
-    Args:
-        arr (np.ndarray): The 2D numpy array to access.
-        coords (List[Coord]): The list of 2D coordinates to access.
-
-    Returns:
-        np.ndarray: The elements of the array at the specified coordinates.
-    """
+    """Access elements of a 2D array via a list of (y,x) coordinates."""
     if len(coords) == 0:
         if isinstance(arr, torch.Tensor):
             return torch.tensor([], dtype=arr.dtype, device=arr.device)
@@ -186,17 +170,6 @@ def pretrain_on_default_value(
     device: torch.device | None = None,
     extractor: FeatureExtractor | None = None,
 ) -> None:
-    """
-    Trains the distance-table model, to predict a default value
-    for random input. Can be used as a way of initialization.
-
-    Args:
-        model (DistanceTableCNN): The model that should be trained
-        grid (Grid): The map that the model should be trained on
-        default_value (float, optional): The default value that should be predicted. Default is the map size.
-        num_epochs (int, optional): How many epochs should be used for training. Defaults to 10.
-        extractor: Feature extractor to use. Defaults to BasicExtractor.
-    """
     if extractor is None:
         extractor = BasicExtractor()
     if device is None:
@@ -236,16 +209,6 @@ def pretrain_on_bfs(
     device: torch.device | None = None,
     extractor: FeatureExtractor | None = None,
 ) -> None:
-    """
-    Trains the distance-table model, to predict the distance to a random goal
-    from a random start on the given grid, using BFS as the target heuristic.
-
-    Args:
-        model (DistanceTableCNN): The model that should be trained
-        grid (Grid): The map that the model should be trained on
-        num_epochs (int, optional): How many epochs should be used for training. Defaults to 10.
-        extractor: Feature extractor to use. Defaults to BasicExtractor.
-    """
     if extractor is None:
         extractor = BasicExtractor()
     if device is None:
@@ -269,7 +232,6 @@ def pretrain_on_bfs(
         bfs_table = _compute_bfs_table(grid, goal)
         target_tensor = torch.tensor(bfs_table, dtype=torch.float32, device=device)
 
-        # Mask out walls so their NIL values don't dominate the loss
         mask = torch.tensor(grid.astype(bool), device=device)
         mean_loss = torch.nn.functional.mse_loss(
             value_tensor[mask], target_tensor[mask]

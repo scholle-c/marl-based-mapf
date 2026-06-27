@@ -1,4 +1,5 @@
 """One-file-per-instance cache of a CBS-optimal MAPF solution."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,9 +26,11 @@ class CachedInstance:
     def save(self, path: Path) -> None:
         """Serialize to a .npz file."""
         lengths = np.array([len(p) for p in self.paths], dtype=np.int32)
-        flat = np.array(
-            [(y, x) for p in self.paths for y, x in p], dtype=np.int32
-        ) if any(self.paths) else np.empty((0, 2), dtype=np.int32)
+        flat = (
+            np.array([(y, x) for p in self.paths for y, x in p], dtype=np.int32)
+            if any(self.paths)
+            else np.empty((0, 2), dtype=np.int32)
+        )
         np.savez(
             path,
             path_lengths=lengths,

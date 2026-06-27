@@ -7,6 +7,7 @@ Usage:
         --output-dir data/random-32-32-20 \\
         --num-agents 30 --subsets-per-scen 10 --timeout 60 --suboptimality 1.2
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,8 +17,8 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from marl_path.shared.mapf_utils import get_grid, get_scenario
-from marl_path.model.training import _compute_bfs_table, _get_path_target_first_visit
+from marl_path.shared.mapf_utils import BfsCache, get_grid, get_scenario
+from marl_path.delay_methods import FirstVisitDelay
 
 from .cbs_runner import run_eecbs
 from .instance import CachedInstance
@@ -36,7 +37,9 @@ def _read_scen_data_lines(scen_file: Path) -> list[str]:
     return lines
 
 
-def _write_subset_scen(data_lines: list[str], indices: list[int], out_path: Path) -> None:
+def _write_subset_scen(
+    data_lines: list[str], indices: list[int], out_path: Path
+) -> None:
     """Write a new scen file containing only the agents at the given indices."""
     with open(out_path, "w") as f:
         f.write("version 1\n")
@@ -106,7 +109,14 @@ def generate(
                 tmp_path = Path(tmp.name)
             try:
                 _write_subset_scen(data_lines, agent_indices, tmp_path)
-                paths = run_eecbs(eecbs_binary, map_file, tmp_path, num_agents, timeout_s, suboptimality)
+                paths = run_eecbs(
+                    eecbs_binary,
+                    map_file,
+                    tmp_path,
+                    num_agents,
+                    timeout_s,
+                    suboptimality,
+                )
             finally:
                 tmp_path.unlink(missing_ok=True)
 
@@ -128,12 +138,13 @@ def generate(
             instance.save(out_file)
 
             # Measure delay distribution: delay(v) = h_total(v) - h_bfs(v)
+            bfs_cache = BfsCache(grid)
+            delay_method = FirstVisitDelay()
             for i, path in enumerate(paths):
-                bfs = _compute_bfs_table(grid, goals[i])
-                targets = _get_path_target_first_visit(path)
-                for coord, t in zip(path, targets):
+                delay_map = delay_method.compute(grid, bfs_cache, paths, goals, i)
+                for coord in path:
                     total_path_cells += 1
-                    if t - bfs[coord] > 1e-6:
+                    if delay_map[coord] > 1e-6:
                         nonzero_delay_cells += 1
 
             logger.info(f"  saved {out_file.name}")
@@ -171,7 +182,7 @@ def main() -> None:
         "--suboptimality",
         type=float,
         default=1.2,
-        help="Suboptimality bound for EECBS (default: 1.2).",
+        help="Suboptimality bound for EECBS (default: 1.2, optimal solutions=1.0).",
     )
     parser.add_argument(
         "--map-file",

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 from loguru import logger
-from typing import Optional
-import torch
 
 from .dist_table import BfsCache, DistTable
 from marl_path.shared.mapf_utils import (
@@ -18,9 +17,6 @@ from marl_path.shared.mapf_utils import (
     get_neighbors,
 )
 from .pibt import PIBT
-
-from marl_path.model.definition import DefaultModel
-from marl_path.model.feature_extraction import FeatureExtractor
 
 
 @dataclass
@@ -66,27 +62,21 @@ class LaCAM:
         grid: Grid,
         starts: Config,
         goals: Config,
-        model: Optional[DefaultModel] = None,
-        device: torch.device | None = None,
-        extractor: Optional[FeatureExtractor] = None,
+        delay_maps: Optional[list[np.ndarray]] = None,
         time_limit_ms: int = 3000,
-        deadline: Deadline | None = None,
+        deadline: Optional[Deadline] = None,
         flg_star: bool = True,
         seed: int = 0,
         verbose: int = 1,
     ) -> Configs:
-        # set problem
         self.num_agents: int = len(starts)
         self.grid: Grid = grid
         self.starts: Config = starts
         self.goals: Config = goals
-        self.model: Optional[DefaultModel] = model
-        self.device: torch.device | None = device
-        self.extractor: Optional[FeatureExtractor] = extractor
+        self.delay_maps = delay_maps
         self.deadline: Deadline = (
             deadline if deadline is not None else Deadline(time_limit_ms)
         )
-        # set hyper parameters
         self.flg_star: bool = flg_star
         self.rng: np.random.Generator = np.random.default_rng(seed=seed)
         self.verbose = verbose
@@ -95,25 +85,21 @@ class LaCAM:
     def _solve(self) -> Configs:
         self.info(1, "start solving MAPF")
 
-        # set distance tables — share one BfsCache so each goal's BFS is computed once
         self.bfs_cache: BfsCache = BfsCache(self.grid)
         self.dist_tables: list[DistTable] = []
-        for g in self.goals:
-            other_agents = [gg for gg in self.goals if gg != g]
+        for i, g in enumerate(self.goals):
+            delay_map = self.delay_maps[i] if self.delay_maps is not None else None
             self.dist_tables.append(DistTable(
                 self.grid, g,
-                model=self.model, device=self.device,
-                extractor=self.extractor, other_agents=other_agents,
                 bfs_cache=self.bfs_cache,
+                delay_map=delay_map,
             ))
         self.pibt = PIBT(self.dist_tables)
 
-        # set search scheme
         OPEN: deque[HighLevelNode] = deque([])
         EXPLORED: dict[Config, HighLevelNode] = {}
         N_goal: HighLevelNode | None = None
 
-        # set initial node
         Q_init = self.starts
         N_init = HighLevelNode(
             Q=Q_init, order=self.get_order(Q_init), h=self.get_h_value(Q_init)
@@ -121,30 +107,24 @@ class LaCAM:
         OPEN.appendleft(N_init)
         EXPLORED[N_init.Q] = N_init
 
-        # main loop
         while len(OPEN) > 0 and not self.deadline.is_expired:
             N: HighLevelNode = OPEN[0]
 
-            # goal check
             if N_goal is None and N.Q == self.goals:
                 N_goal = N
                 self.info(1, f"initial solution found, cost={N_goal.g}")
-                # no refinement -> terminate
                 if not self.flg_star:
                     break
 
-            # lower bound check
             if N_goal is not None and N_goal.g <= N.f:
                 OPEN.popleft()
                 continue
 
-            # low-level search end
             if len(N.tree) == 0:
                 OPEN.popleft()
                 continue
 
-            # low-level search
-            C: LowLevelNode = N.tree.popleft()  # constraints
+            C: LowLevelNode = N.tree.popleft()
             if C.depth < self.num_agents:
                 i = N.order[C.depth]
                 v = N.Q[i]
@@ -153,17 +133,13 @@ class LaCAM:
                 for u in cands:
                     N.tree.append(C.get_child(i, u))
 
-            # generate the next configuration
             Q_to = self.configuration_generaotr(N, C)
             if Q_to is None:
-                # invalid configuration
                 continue
             elif Q_to in EXPLORED.keys():
-                # known configuration
                 N_known = EXPLORED[Q_to]
                 N.neighbors.add(N_known)
-                OPEN.appendleft(N_known)  # typically helpful
-                # rewrite, Dijkstra update
+                OPEN.appendleft(N_known)
                 D = deque([N])
                 while len(D) > 0 and self.flg_star:
                     N_from = D.popleft()
@@ -179,7 +155,6 @@ class LaCAM:
                             if N_goal is not None and N_to.f < N_goal.g:
                                 OPEN.appendleft(N_to)
             else:
-                # new configuration
                 N_new = HighLevelNode(
                     Q=Q_to,
                     parent=N,
@@ -191,7 +166,6 @@ class LaCAM:
                 OPEN.appendleft(N_new)
                 EXPLORED[Q_to] = N_new
 
-        # categorize result
         if N_goal is not None and len(OPEN) == 0:
             self.info(1, f"reach optimal solution, cost={N_goal.g}")
         elif N_goal is not None:
@@ -213,7 +187,6 @@ class LaCAM:
         return configs
 
     def get_edge_cost(self, Q_from: Config, Q_to: Config) -> int:
-        # e.g., \sum_i | not (Q_from[i] == Q_to[k] == g_i) |
         cost = 0
         for i in range(self.num_agents):
             if not (self.goals[i] == Q_from[i] == Q_to[i]):
@@ -221,9 +194,8 @@ class LaCAM:
         return cost
 
     def get_h_value(self, Q: Config) -> int:
-        # e.g., \sum_i dist(Q[i], g_i)
         cost = 0
-        for agent_idx, loc in enumerate(Q):  # type: ignore
+        for agent_idx, loc in enumerate(Q):
             c = self.dist_tables[agent_idx].get(loc)
             if c is None:
                 return np.iinfo(np.int32).max
@@ -231,8 +203,6 @@ class LaCAM:
         return cost
 
     def get_order(self, Q: Config) -> list[int]:
-        # e.g., by descending order of dist(Q[i], g_i)
-        # Note that this is not an effective PIBT prioritization scheme
         order = list(range(self.num_agents))
         self.rng.shuffle(order)
         order.sort(key=lambda i: self.dist_tables[i].get(Q[i]), reverse=True)
@@ -241,12 +211,10 @@ class LaCAM:
     def configuration_generaotr(
         self, N: HighLevelNode, C: LowLevelNode
     ) -> Config | None:
-        # setup next configuration
         Q_to = Config([self.pibt.NIL_COORD for _ in range(self.num_agents)])
         for k in range(C.depth):
             Q_to[C.who[k]] = C.where[k]
 
-        # apply PIBT
         success = self.pibt.step(N.Q, Q_to, N.order)
         return Q_to if success else None
 

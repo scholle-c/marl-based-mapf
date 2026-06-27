@@ -12,23 +12,17 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Carsten Scholle", email = "carsten.scholle@gmail.com"}]
 dependencies = [
-    "torch",
-    "torchvision",
-    "torchviz",
+    "numpy",
+    "matplotlib",
     "loguru",
-    "matplotlib"
 ]
 
 
 [project.optional-dependencies]
-dev =  [
+dev = [
     "pytest",
     "pre-commit",
     "commitizen"
-]
-webserver = [
-    "plotly",
-    "streamlit"
 ]
 
 
@@ -38,7 +32,7 @@ Repository = "https://github.com/scholle-c/marl-based-mapf"
 
 [project.scripts]
 marl-path = "marl_path.cli:main"
-marl-vis = "marl_path.visualization.cli:main"
+marl-viz = "marl_path.viz:main"
 marl-generate = "marl_path.dataset.generate:main"
 
 

@@ -1,32 +1,10 @@
-# LaCAM / eval settings (Track B)
-map_file        = "./assets/random-32-32-20.map"
-scen_file       = "./assets/random-32-32-20_map-scen-random/scen-random/random-32-32-20-random-1.scen"
-num_agents      = 10
-verbose         = 0
+# Dataset
+dataset_dir     = "./data/random-32-32-20-cbs"
+
+# Delay method — available: "zero", "first_visit"
+delay_method    = "goal_pressure"
+
+# LaCAM settings
 seed            = 1
 time_limit_ms   = 5000
-flg_star        = true
-
-# Pipeline
-pipeline_mode   = "supervised_delay"
-
-# Dataset
-dataset_dir     = "./data/random-32-32-20"
-val_split       = 0.1
-
-# Training
-epochs          = 10
-batch_size      = 4
-lr              = 1e-3
-device          = "auto"
-seed_training   = 1
-feature_extractor_type = "aggregated_agents_channel"
-model_initialization_mode = 0
-
-# Track B eval frequency
-eval_interval   = 2
-eval_seeds      = 3
-
-# Output
-output_dir      = "./output/default_output"
-record_mode     = 1
+flg_star        = false

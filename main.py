@@ -1,4 +1,4 @@
-from marl_path import main
+from marl_path.cli import main
 
 
 if __name__ == "__main__":

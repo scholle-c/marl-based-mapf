@@ -1,4 +1,5 @@
 """Evaluation pipeline: compare LaCAM with vs. without a precomputed delay table."""
+
 from __future__ import annotations
 
 import argparse
@@ -11,7 +12,13 @@ from loguru import logger
 from marl_path.dataset.instance import CachedInstance
 from marl_path.delay_methods import DelayMethod
 from marl_path.pycam import LaCAM
-from marl_path.shared.mapf_utils import BfsCache, Config, Configs, get_grid, get_scenario
+from marl_path.shared.mapf_utils import (
+    BfsCache,
+    Config,
+    Configs,
+    get_grid,
+    get_scenario,
+)
 
 
 @dataclass
@@ -31,7 +38,9 @@ class InstanceResult:
         return (self.soc_baseline - self.soc_delay) / denom  # type: ignore[operator]
 
 
-def run_evaluation(args: argparse.Namespace, delay_method: DelayMethod) -> list[InstanceResult]:
+def run_evaluation(
+    args: argparse.Namespace, delay_method: DelayMethod
+) -> list[InstanceResult]:
     dataset_dir = Path(args.dataset_dir)
     npz_files = sorted(dataset_dir.glob("*.npz"))
     if not npz_files:
@@ -39,8 +48,11 @@ def run_evaluation(args: argparse.Namespace, delay_method: DelayMethod) -> list[
 
     logger.info(
         "Evaluating {} instances from {}, delay_method={}, seed={}, time_limit={}ms",
-        len(npz_files), dataset_dir, type(delay_method).__name__,
-        args.seed, args.time_limit_ms,
+        len(npz_files),
+        dataset_dir,
+        type(delay_method).__name__,
+        args.seed,
+        args.time_limit_ms,
     )
 
     results: list[InstanceResult] = []
@@ -61,8 +73,18 @@ def run_evaluation(args: argparse.Namespace, delay_method: DelayMethod) -> list[
             for agent_idx in range(len(instance.paths))
         ]
 
-        soc_baseline = _run_lacam(grid, starts, goals, args.seed, args.time_limit_ms, args.flg_star)
-        soc_delay = _run_lacam(grid, starts, goals, args.seed, args.time_limit_ms, args.flg_star, delay_maps=delay_maps)
+        soc_baseline = _run_lacam(
+            grid, starts, goals, args.seed, args.time_limit_ms, args.flg_star
+        )
+        soc_delay = _run_lacam(
+            grid,
+            starts,
+            goals,
+            args.seed,
+            args.time_limit_ms,
+            args.flg_star,
+            delay_maps=delay_maps,
+        )
         soc_cbs = _soc_from_paths(instance.paths)
 
         result = InstanceResult(
@@ -73,7 +95,11 @@ def run_evaluation(args: argparse.Namespace, delay_method: DelayMethod) -> list[
         )
         results.append(result)
 
-        gap_str = f"  gap_closed={100*result.gap_closed:.1f}%" if result.gap_closed is not None else ""
+        gap_str = (
+            f"  gap_closed={100 * result.gap_closed:.1f}%"
+            if result.gap_closed is not None
+            else ""
+        )
         logger.info(
             "{}: baseline={} delay={} cbs={}{}",
             npz_path.stem,
@@ -116,7 +142,9 @@ def _soc_from_paths(paths: list[list]) -> float:
         return 0.0
     max_len = max(len(p) for p in paths)
     padded = [p + [p[-1]] * (max_len - len(p)) for p in paths]
-    solution: Configs = [[padded[a][t] for a in range(len(padded))] for t in range(max_len)]  # type: ignore[misc]
+    solution: Configs = [
+        [padded[a][t] for a in range(len(padded))] for t in range(max_len)
+    ]  # type: ignore[misc]
     return float(_get_soc(solution))
 
 
@@ -134,7 +162,9 @@ def _get_soc(solution: Configs) -> int:
 
 
 def _log_summary(results: list[InstanceResult]) -> None:
-    valid = [r for r in results if r.soc_baseline is not None and r.soc_delay is not None]
+    valid = [
+        r for r in results if r.soc_baseline is not None and r.soc_delay is not None
+    ]
     if not valid:
         logger.warning("No successful runs to summarize.")
         return
@@ -150,9 +180,14 @@ def _log_summary(results: list[InstanceResult]) -> None:
         "  delay    : mean={:.1f}  std={:.1f},  median={:.1f}\n"
         "  cbs      : mean={:.1f}, \n"
         "  gap_closed: mean={:.1f}%  (win_rate={:.1f}%)",
-        len(valid), len(results),
-        float(np.mean(baselines)), float(np.std(baselines)), float(np.median(baselines)),
-        float(np.mean(delays)), float(np.std(delays)), float(np.median(delays)),
+        len(valid),
+        len(results),
+        float(np.mean(baselines)),
+        float(np.std(baselines)),
+        float(np.median(baselines)),
+        float(np.mean(delays)),
+        float(np.std(delays)),
+        float(np.median(delays)),
         float(np.mean(cbss)) if cbss else float("nan"),
         float(np.mean(gaps) * 100) if gaps else float("nan"),
         float(np.mean([d < b for d, b in zip(delays, baselines)]) * 100),

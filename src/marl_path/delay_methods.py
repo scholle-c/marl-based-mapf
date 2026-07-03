@@ -10,6 +10,7 @@ To add a new method:
 1. Subclass DelayMethod and implement compute().
 2. Register it in DELAY_METHODS at the bottom of this file.
 """
+
 from __future__ import annotations
 
 import heapq
@@ -67,6 +68,25 @@ class FirstVisitDelay(DelayMethod):
         for coord, t in first_visit.items():
             cbs_cost_to_go = total - t
             delay_map[coord] = max(0.0, float(cbs_cost_to_go - bfs_table[coord]))
+
+        return delay_map
+
+
+class NonOptimalPenaltyDelay(DelayMethod):
+    """Delay = Penalty (e.g. +1) for each cell that isnt on the optimal path of the agent.
+
+    I want to see if this can even improve LaCAM's performance generally for all maps (this would prove that a general delay exist for improvement).
+    The idea is that if the agent is not on the optimal path, it should be penalized to encourage it to get back on track.
+    """
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:
+        path = paths[agent_idx]
+        delay_map = np.ones(grid.shape, dtype=np.float32)
+        if not path:
+            return delay_map
+
+        for coord in path:
+            delay_map[coord] = 0.0  # No penalty for cells on the optimal path
 
         return delay_map
 
@@ -256,6 +276,7 @@ class TopologicalDelay(DelayMethod):
                     delay_map[y, x] = max(0.0, (4 - n) * self.scale)
         return delay_map
 
+
 class RandomDelay(DelayMethod):
     """Random delay values for each free cell.
 
@@ -271,12 +292,15 @@ class RandomDelay(DelayMethod):
         self.scale = scale
 
     def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:  # noqa: ARG002
-        delay_map = np.random.uniform(0.0, self.scale, size=grid.shape).astype(np.float32)
+        delay_map = np.random.uniform(0.0, self.scale, size=grid.shape).astype(
+            np.float32
+        )
         delay_map[~grid] = 0.0
         return delay_map
 
 
 # ── Shared helper ─────────────────────────────────────────────────────────────
+
 
 def _diffuse(
     grid: Grid,
@@ -320,16 +344,17 @@ def _diffuse(
 # Add new methods here and they become available via --delay-method.
 
 DELAY_METHODS: dict[str, type[DelayMethod]] = {
-    "zero":                   ZeroDelay,
-    "first_visit":            FirstVisitDelay,
-    "diffused_first_visit":   DiffusedFirstVisitDelay,
-    "global_congestion":          GlobalCongestionDelay,
+    "zero": ZeroDelay,
+    "first_visit": FirstVisitDelay,
+    "diffused_first_visit": DiffusedFirstVisitDelay,
+    "global_congestion": GlobalCongestionDelay,
     "diffused_global_congestion": DiffusedGlobalCongestionDelay,
-    "wait_time":                  WaitTimeDelay,
-    "diffused_wait_time":     DiffusedWaitTimeDelay,
-    "goal_pressure":          GoalPressureDelay,
-    "topological":            TopologicalDelay,
-    "random":                   RandomDelay,
+    "wait_time": WaitTimeDelay,
+    "diffused_wait_time": DiffusedWaitTimeDelay,
+    "goal_pressure": GoalPressureDelay,
+    "topological": TopologicalDelay,
+    "random": RandomDelay,
+    "non_optimal_penalty": NonOptimalPenaltyDelay,
 }
 
 

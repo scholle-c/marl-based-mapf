@@ -1,10 +1,13 @@
 # Dataset
-dataset_dir     = "./data/random-32-32-20-cbs"
+dataset_dir     = "./data/random-32-32-20"
 
 # Delay method — available: "zero", "first_visit"
-delay_method    = "goal_pressure"
+delay_method    = "non_optimal_penalty"
 
 # LaCAM settings
 seed            = 1
 time_limit_ms   = 5000
 flg_star        = false
+
+# Other
+output_dir = "./output/delete"

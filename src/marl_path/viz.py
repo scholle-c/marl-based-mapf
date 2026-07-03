@@ -24,6 +24,7 @@ Fallback — provide map/scen directly (requires --eecbs-binary for CBS paths):
         --scen-file assets/.../random-32-32-20-random-1.scen \\
         --num-agents 10 --eecbs-binary EECBS/eecbs
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +32,8 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import RadioButtons
+from matplotlib.axes import Axes
+from matplotlib.widgets import RadioButtons, Slider
 from loguru import logger
 
 from marl_path.dataset.cbs_runner import run_eecbs
@@ -39,7 +41,15 @@ from marl_path.dataset.instance import CachedInstance
 from marl_path.delay_methods import DELAY_METHODS, get_delay_method
 from marl_path.pycam import LaCAM
 from marl_path.pipeline import _get_soc
-from marl_path.shared.mapf_utils import BfsCache, Config, Configs, Coord, Grid, get_grid, get_scenario
+from marl_path.shared.mapf_utils import (
+    BfsCache,
+    Config,
+    Configs,
+    Coord,
+    Grid,
+    get_grid,
+    get_scenario,
+)
 
 
 _COLORS = plt.cm.tab20.colors  # type: ignore[attr-defined]
@@ -51,7 +61,10 @@ def _color(i: int):
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
-def _load_from_npz(npz_path: Path) -> tuple[Grid, Config, Config, list[Coord], list[list[Coord]]]:
+
+def _load_from_npz(
+    npz_path: Path,
+) -> tuple[Grid, Config, Config, list[Coord], list[list[Coord]]]:
     """Load grid, starts, goals, and CBS paths from a cached instance file."""
     instance = CachedInstance.load(npz_path)
     grid = get_grid(instance.map_file)
@@ -76,7 +89,9 @@ def _load_from_map_scen(
     eecbs = getattr(args, "eecbs_binary", None)
     if eecbs and Path(eecbs).exists():
         logger.info("Running EECBS...")
-        cbs_paths = run_eecbs(eecbs, args.map_file, args.scen_file, len(goal_list), timeout_s=args.timeout)
+        cbs_paths = run_eecbs(
+            eecbs, args.map_file, args.scen_file, len(goal_list), timeout_s=args.timeout
+        )
         if cbs_paths is None:
             logger.warning("CBS timed out or failed — delay heatmap will be empty.")
         else:
@@ -89,6 +104,7 @@ def _load_from_map_scen(
 
 
 # ── Main computation ──────────────────────────────────────────────────────────
+
 
 def compute_all(args: argparse.Namespace) -> dict:
     # ── Resolve instance source ───────────────────────────────────────────────
@@ -122,14 +138,20 @@ def compute_all(args: argparse.Namespace) -> dict:
         dm = get_delay_method(args.delay_method)
         bfs = BfsCache(grid)
         delay_maps = [dm.compute(grid, bfs, cbs_paths, goal_list, i) for i in range(n)]
-        delay_heatmap = np.where(grid, np.sum(delay_maps, axis=0), np.nan).astype(np.float32)
+        delay_heatmap = np.where(grid, np.sum(delay_maps, axis=0), np.nan).astype(
+            np.float32
+        )
 
     # ── LaCAM baseline ────────────────────────────────────────────────────────
     logger.info("Running LaCAM baseline...")
     sol_b = LaCAM().solve(
-        grid=grid, starts=starts, goals=goals,
-        seed=args.seed, time_limit_ms=args.time_limit_ms,
-        flg_star=args.flg_star, verbose=0,
+        grid=grid,
+        starts=starts,
+        goals=goals,
+        seed=args.seed,
+        time_limit_ms=args.time_limit_ms,
+        flg_star=args.flg_star,
+        verbose=0,
     )
     baseline_paths = _solution_to_agent_paths(sol_b)
     baseline_soc = float(_get_soc(sol_b)) if sol_b else None
@@ -141,16 +163,22 @@ def compute_all(args: argparse.Namespace) -> dict:
     if delay_maps is not None:
         logger.info("Running LaCAM + delay...")
         sol_d = LaCAM().solve(
-            grid=grid, starts=starts, goals=goals,
+            grid=grid,
+            starts=starts,
+            goals=goals,
             delay_maps=delay_maps,
-            seed=args.seed, time_limit_ms=args.time_limit_ms,
-            flg_star=args.flg_star, verbose=0,
+            seed=args.seed,
+            time_limit_ms=args.time_limit_ms,
+            flg_star=args.flg_star,
+            verbose=0,
         )
         delay_lacam_paths = _solution_to_agent_paths(sol_d)
         delay_lacam_soc = float(_get_soc(sol_d)) if sol_d else None
         logger.info("Delay SOC: {}", delay_lacam_soc)
 
-    instance_label = npz_path.stem if npz_path else Path(getattr(args, "map_file", "?")).stem
+    instance_label = (
+        npz_path.stem if npz_path else Path(getattr(args, "map_file", "?")).stem
+    )
 
     return {
         "grid": grid,
@@ -163,18 +191,23 @@ def compute_all(args: argparse.Namespace) -> dict:
         "delay_paths": delay_lacam_paths,
         "delay_soc": delay_lacam_soc,
         "delay_heatmap": delay_heatmap,
+        "delay_maps": delay_maps,
         "instance_label": instance_label,
     }
 
 
 # ── Path conversion helpers ───────────────────────────────────────────────────
 
+
 def _agent_paths_to_solution(paths: list[list[Coord]]) -> Configs:
     if not paths:
         return []
     max_t = max(len(p) for p in paths)
     padded = [p + [p[-1]] * (max_t - len(p)) for p in paths]
-    return [Config(positions=[padded[a][t] for a in range(len(padded))]) for t in range(max_t)]
+    return [
+        Config(positions=[padded[a][t] for a in range(len(padded))])
+        for t in range(max_t)
+    ]
 
 
 def _solution_to_agent_paths(solution: Configs) -> list[list[Coord]] | None:
@@ -186,37 +219,88 @@ def _solution_to_agent_paths(solution: Configs) -> list[list[Coord]] | None:
 
 # ── Drawing ───────────────────────────────────────────────────────────────────
 
-def _draw_grid_bg(ax: plt.Axes, grid: Grid) -> None:
+
+def _draw_grid_bg(ax: Axes, grid: Grid) -> None:
     bg = np.where(grid, 0.93, 0.15).astype(float)
-    ax.imshow(bg, cmap="gray", vmin=0.0, vmax=1.0, origin="upper", interpolation="nearest")
+    ax.imshow(
+        bg, cmap="gray", vmin=0.0, vmax=1.0, origin="upper", interpolation="nearest"
+    )
     ax.set_xticks([])
     ax.set_yticks([])
 
 
 def _draw_paths_on(
-    ax: plt.Axes,
+    ax: Axes,
     grid: Grid,
     paths: list[list[Coord]] | None,
     starts: list[Coord],
     goals: list[Coord],
     title: str,
+    highlight_agent: int | None = None,
 ) -> None:
     _draw_grid_bg(ax, grid)
     ax.set_title(title, fontsize=10)
     if paths is None:
-        ax.text(0.5, 0.5, "No solution", transform=ax.transAxes,
-                ha="center", va="center", fontsize=12, color="red")
+        ax.text(
+            0.5,
+            0.5,
+            "No solution",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=12,
+            color="red",
+        )
         return
     for i, path in enumerate(paths):
         c = _color(i)
         xs = [p[1] for p in path]
         ys = [p[0] for p in path]
-        ax.plot(xs, ys, color=c, linewidth=1.5, alpha=0.75)
-        ax.plot(starts[i][1], starts[i][0], "o", color=c, markersize=6, zorder=4)
-        ax.plot(goals[i][1],  goals[i][0],  "*", color=c, markersize=9, zorder=4)
+        is_hl = highlight_agent is not None and i == highlight_agent
+        dimmed = highlight_agent is not None and not is_hl
+        alpha = 1.0 if is_hl else (0.15 if dimmed else 0.75)
+        lw = 3.0 if is_hl else 1.5
+        z = 6 if is_hl else 2
+        edge = "black" if is_hl else "none"
+        ew = 1.5 if is_hl else 0.0
+        ax.plot(xs, ys, color=c, linewidth=lw, alpha=alpha, zorder=z)
+        ax.plot(
+            starts[i][1],
+            starts[i][0],
+            "o",
+            color=c,
+            markersize=10 if is_hl else 6,
+            markeredgecolor=edge,
+            markeredgewidth=ew,
+            alpha=alpha,
+            zorder=z + 1,
+        )
+        ax.plot(
+            goals[i][1],
+            goals[i][0],
+            "*",
+            color=c,
+            markersize=14 if is_hl else 9,
+            markeredgecolor=edge,
+            markeredgewidth=ew,
+            alpha=alpha,
+            zorder=z + 1,
+        )
+        if is_hl:
+            ax.annotate(
+                f"agent {i}",
+                (starts[i][1], starts[i][0]),
+                textcoords="offset points",
+                xytext=(7, 7),
+                fontsize=9,
+                fontweight="bold",
+                color="black",
+                zorder=z + 2,
+            )
 
 
 # ── Figure ────────────────────────────────────────────────────────────────────
+
 
 def _soc_label(val: float | None, name: str) -> str:
     return f"{name}: {int(val)}" if val is not None else f"{name}: FAIL"
@@ -230,19 +314,31 @@ def show(args: argparse.Namespace, data: dict) -> None:
         f"{data['instance_label']}  |  {len(data['goals'])} agents"
         f"  |  delay={args.delay_method}  |  seed={args.seed}  |  "
         + _soc_label(data["cbs_soc"], "CBS")
-        + "   " + _soc_label(data["baseline_soc"], "Baseline")
-        + "   " + _soc_label(data["delay_soc"], "Delay"),
+        + "   "
+        + _soc_label(data["baseline_soc"], "Baseline")
+        + "   "
+        + _soc_label(data["delay_soc"], "Delay"),
         fontsize=10,
     )
 
-    ax_heat  = fig.add_axes([0.04, 0.20, 0.41, 0.72])
-    ax_paths = fig.add_axes([0.54, 0.20, 0.41, 0.72])
-    ax_radio = fig.add_axes([0.25, 0.02, 0.50, 0.12])
+    ax_heat = fig.add_axes((0.04, 0.20, 0.41, 0.72))
+    ax_paths = fig.add_axes((0.54, 0.20, 0.41, 0.72))
+    ax_radio = fig.add_axes((0.25, 0.02, 0.50, 0.10))
+    ax_slider = fig.add_axes((0.25, 0.14, 0.50, 0.03))
+
+    delay_maps: list[np.ndarray] | None = data["delay_maps"]
+    n_agents = len(data["goals"])
+
+    def _heatmap_for(agent_idx: int) -> np.ndarray:
+        if delay_maps is None:
+            return data["delay_heatmap"]
+        arr = np.sum(delay_maps, axis=0) if agent_idx < 0 else delay_maps[agent_idx]
+        return np.where(grid, arr, np.nan).astype(np.float32)
 
     # Left: heatmap
     cmap = plt.cm.YlOrRd.copy()  # type: ignore[attr-defined]
     cmap.set_bad(color=(0.15, 0.15, 0.15))
-    masked = np.ma.masked_invalid(data["delay_heatmap"])
+    masked = np.ma.masked_invalid(_heatmap_for(-1))
     im = ax_heat.imshow(masked, cmap=cmap, origin="upper", interpolation="nearest")
     ax_heat.set_title("Delay heatmap (sum over agents)", fontsize=10)
     ax_heat.set_xticks([])
@@ -251,29 +347,93 @@ def show(args: argparse.Namespace, data: dict) -> None:
 
     # Right: path panel
     path_options: dict[str, list[list[Coord]] | None] = {
-        "CBS":      data["cbs_paths"],
+        "CBS": data["cbs_paths"],
         "Baseline": data["baseline_paths"],
-        "Delay":    data["delay_paths"],
+        "Delay": data["delay_paths"],
     }
     labels = list(path_options.keys())
-    active_idx = next((i for i, k in enumerate(labels) if path_options[k] is not None), 1)
-    _draw_paths_on(ax_paths, grid, path_options[labels[active_idx]],
-                   data["starts"], data["goals"], f"{labels[active_idx]} paths")
+    active_idx = next(
+        (i for i, k in enumerate(labels) if path_options[k] is not None), 1
+    )
+    state = {"path_label": labels[active_idx], "agent_idx": -1}
+    _draw_paths_on(
+        ax_paths,
+        grid,
+        path_options[state["path_label"]],
+        data["starts"],
+        data["goals"],
+        f"{state['path_label']} paths",
+    )
 
-    # Radio buttons
+    # Radio buttons: choose which solution's paths to show
     radio = RadioButtons(ax_radio, labels, active=active_idx)
 
-    def on_select(label: str) -> None:
+    # Slider: choose which agent's delay to show (-1 = all agents, aggregated)
+    agent_slider = Slider(
+        ax_slider,
+        "Agent",
+        -1,
+        max(n_agents - 1, 0),
+        valinit=-1,
+        valstep=1,
+    )
+    agent_slider.valtext.set_text("All")
+    if delay_maps is None:
+        agent_slider.ax.set_visible(
+            False
+        )  # nothing to slice without per-agent delay maps
+
+    def _refresh_heatmap() -> None:
+        masked = np.ma.masked_invalid(_heatmap_for(state["agent_idx"]))
+        im.set_data(masked)
+        finite = masked.compressed()
+        if finite.size:
+            im.set_clim(
+                vmin=float(finite.min()),
+                vmax=float(max(finite.max(), finite.min() + 1e-6)),
+            )
+        ax_heat.set_title(
+            "Delay heatmap (sum over agents)"
+            if state["agent_idx"] < 0
+            else f"Delay heatmap — agent {state['agent_idx']}",
+            fontsize=10,
+        )
+
+    def _refresh_paths() -> None:
         ax_paths.cla()
-        _draw_paths_on(ax_paths, grid, path_options[label],
-                       data["starts"], data["goals"], f"{label} paths")
+        highlight = state["agent_idx"] if state["agent_idx"] >= 0 else None
+        _draw_paths_on(
+            ax_paths,
+            grid,
+            path_options[state["path_label"]],
+            data["starts"],
+            data["goals"],
+            f"{state['path_label']} paths",
+            highlight_agent=highlight,
+        )
+
+    def on_select(label: str | None) -> None:
+        if label is None:
+            return
+        state["path_label"] = label
+        _refresh_paths()
+        fig.canvas.draw_idle()
+
+    def on_agent_change(val: float) -> None:
+        idx = int(round(val))
+        state["agent_idx"] = idx
+        agent_slider.valtext.set_text("All" if idx < 0 else f"Agent {idx}")
+        _refresh_heatmap()
+        _refresh_paths()
         fig.canvas.draw_idle()
 
     radio.on_clicked(on_select)
+    agent_slider.on_changed(on_agent_change)
     plt.show()
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -289,29 +449,48 @@ def main() -> None:
 
     # Instance source
     src = parser.add_mutually_exclusive_group()
-    src.add_argument("--npz-file",     type=Path, help="Path to a single .npz cached instance.")
-    src.add_argument("--dataset-dir",  type=Path, help="Dataset directory; use with --instance-idx.")
-    parser.add_argument("--instance-idx", type=int, default=0,
-                        help="Index of the instance in --dataset-dir (default: 0).")
+    src.add_argument(
+        "--npz-file", type=Path, help="Path to a single .npz cached instance."
+    )
+    src.add_argument(
+        "--dataset-dir", type=Path, help="Dataset directory; use with --instance-idx."
+    )
+    parser.add_argument(
+        "--instance-idx",
+        type=int,
+        default=0,
+        help="Index of the instance in --dataset-dir (default: 0).",
+    )
     # Fallback: raw map/scen
-    parser.add_argument("--map-file",      type=Path)
-    parser.add_argument("--scen-file",     type=Path)
+    parser.add_argument("--map-file", type=Path)
+    parser.add_argument("--scen-file", type=Path)
     parser.add_argument("-N", "--num-agents", type=int, default=10)
-    parser.add_argument("--eecbs-binary",  type=Path, default=None,
-                        help="EECBS binary (only needed with --map-file).")
-    parser.add_argument("--timeout",       type=float, default=60.0)
+    parser.add_argument(
+        "--eecbs-binary",
+        type=Path,
+        default=None,
+        help="EECBS binary (only needed with --map-file).",
+    )
+    parser.add_argument("--timeout", type=float, default=60.0)
 
     # Delay + solver
-    parser.add_argument("--delay-method", type=str, default="first_visit",
-                        choices=list(DELAY_METHODS))
-    parser.add_argument("-s", "--seed",          type=int,  default=0)
-    parser.add_argument("-t", "--time-limit-ms", type=int,  default=5000)
-    parser.add_argument("--flg-star", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--delay-method", type=str, default="first_visit", choices=list(DELAY_METHODS)
+    )
+    parser.add_argument("-s", "--seed", type=int, default=0)
+    parser.add_argument("-t", "--time-limit-ms", type=int, default=5000)
+    parser.add_argument(
+        "--flg-star", action=argparse.BooleanOptionalAction, default=True
+    )
 
     args = parser.parse_args()
 
     # Validate: at least one source must be given
-    if not args.npz_file and not args.dataset_dir and not (args.map_file and args.scen_file):
+    if (
+        not args.npz_file
+        and not args.dataset_dir
+        and not (args.map_file and args.scen_file)
+    ):
         parser.error("Provide --npz-file, --dataset-dir, or --map-file + --scen-file.")
 
     logger.info("Computing — this may take a moment...")

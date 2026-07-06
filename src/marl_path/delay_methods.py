@@ -91,6 +91,35 @@ class NonOptimalPenaltyDelay(DelayMethod):
         return delay_map
 
 
+class NonAStarPenaltyDelay(DelayMethod):
+    """Delay = Penalty (e.g. +1) for each cell that isnt on the A* path of the agent.
+
+    Is used to compare it with the NonOptimalPenaltyDelay to see how important it is to have the optimal path from CBS as a reference for the delay.
+    """
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:
+        delay_map = np.ones(grid.shape, dtype=np.float32)
+        if not paths[agent_idx]:
+            return delay_map
+
+        bfs_table = bfs_cache[goals[agent_idx]]
+        goal = goals[agent_idx]
+
+        # Reconstruct the greedy BFS-descent path from start to goal: at each
+        # step, move to the neighbor with the smallest distance-to-goal.
+        current = paths[agent_idx][0]
+        a_star_path = [current]
+        while current != goal:
+            neighbors = get_neighbors(grid, current)
+            current = min(neighbors, key=lambda n: bfs_table[n])
+            a_star_path.append(current)
+
+        for coord in a_star_path:
+            delay_map[coord] = 0.0  # No penalty for cells on the A* path
+
+        return delay_map
+
+
 class DiffusedFirstVisitDelay(DelayMethod):
     """FirstVisitDelay values BFS-propagated to all reachable cells.
 
@@ -355,6 +384,7 @@ DELAY_METHODS: dict[str, type[DelayMethod]] = {
     "topological": TopologicalDelay,
     "random": RandomDelay,
     "non_optimal_penalty": NonOptimalPenaltyDelay,
+    "non_astar_penalty": NonAStarPenaltyDelay,
 }
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import heapq
 from abc import ABC, abstractmethod
+from collections import deque
 
 import numpy as np
 
@@ -87,6 +88,39 @@ class NonOptimalPenaltyDelay(DelayMethod):
 
         for coord in path:
             delay_map[coord] = 0.0  # No penalty for cells on the optimal path
+
+        return delay_map
+
+
+class NonOptimalPenaltyBFSDelay(DelayMethod):
+    """Delay = Penalty (e.g. x + 0 if on optimal path, x = min(neigh(x)) + 1 otherwise) for each cell that isnt on the optimal path of the agent.
+
+    I want to check if the heuristic works better than the NonOptimalPenaltyDelay (where the penalty is constant at 1),
+    because it encourages the agent to get back on track faster if it is further away from the optimal path.
+    """
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:
+        path = paths[agent_idx]
+        max_value = np.max(grid.shape) * 2
+
+        delay_map = np.ones(grid.shape, dtype=np.float32) * max_value
+        if not path:
+            return delay_map
+
+        # Multi-source BFS from the path cells, propagating +1 penalty per hop.
+        visited = set(path)
+        for coord in path:
+            delay_map[coord] = 0.0  # No penalty for cells on the optimal path
+
+        open_queue: deque = deque(visited)
+        while open_queue:
+            current = open_queue.popleft()
+            current_delay = delay_map[current]
+            for neighbor in get_neighbors(grid, current):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    delay_map[neighbor] = current_delay + 1
+                    open_queue.append(neighbor)
 
         return delay_map
 
@@ -384,6 +418,7 @@ DELAY_METHODS: dict[str, type[DelayMethod]] = {
     "topological": TopologicalDelay,
     "random": RandomDelay,
     "non_optimal_penalty": NonOptimalPenaltyDelay,
+    "non_optimal_penalty_bfs": NonOptimalPenaltyBFSDelay,
     "non_astar_penalty": NonAStarPenaltyDelay,
 }
 

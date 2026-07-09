@@ -74,6 +74,7 @@ class LaCAM:
         flg_star: bool = True,
         seed: int = 0,
         verbose: int = 1,
+        penalty_scale: float = 1.0,
     ) -> Configs:
         # set problem
         self.num_agents: int = len(starts)
@@ -83,6 +84,7 @@ class LaCAM:
         self.model: Optional[DefaultModel] = model
         self.device: torch.device | None = device
         self.extractor: Optional[FeatureExtractor] = extractor
+        self.penalty_scale: float = penalty_scale
         self.deadline: Deadline = (
             deadline if deadline is not None else Deadline(time_limit_ms)
         )
@@ -98,12 +100,14 @@ class LaCAM:
         # set distance tables — share one BfsCache so each goal's BFS is computed once
         self.bfs_cache: BfsCache = BfsCache(self.grid)
         self.dist_tables: list[DistTable] = []
-        for g in self.goals:
-            other_agents = [gg for gg in self.goals if gg != g]
+        for i, g in enumerate(self.goals):
+            other_agents = [gg for j, gg in enumerate(self.goals) if j != i]
+            other_agent_starts = [ss for j, ss in enumerate(self.starts) if j != i]
             self.dist_tables.append(DistTable(
                 self.grid, g,
                 model=self.model, device=self.device,
                 extractor=self.extractor, other_agents=other_agents,
+                other_agent_starts=other_agent_starts, penalty_scale=self.penalty_scale,
                 bfs_cache=self.bfs_cache,
             ))
         self.pibt = PIBT(self.dist_tables)

@@ -8,6 +8,8 @@ import torch
 import numpy as np
 
 from marl_path.shared import Coord, get_neighbors
+from marl_path.shared.mapf_utils import BfsCache
+from marl_path.delay_methods import DelayMethod, NonOptimalPenaltyDelay
 from .feature_extraction import FeatureExtractor, BasicExtractor
 
 
@@ -19,6 +21,46 @@ class DelayBatchItem:
     paths: List[List[Coord]]
     bfs_distances: List[np.ndarray]
     targets: torch.Tensor
+
+
+@dataclass
+class DenseDelayBatchItem:
+    """Raw data for one episode's dense, full-grid target (e.g. NonOptimalPenaltyDelay).
+
+    Unlike DelayBatchItem, targets cover every free cell of the grid for every
+    agent, not just cells visited on that agent's path.
+    """
+
+    input_tensors: List[torch.Tensor]
+    targets: torch.Tensor  # (num_agents, H, W)
+    free_mask: torch.Tensor  # (H, W) bool — True where the grid is traversable
+
+
+def prepare_dense_delay_batch_item(
+    grid: np.ndarray,
+    bfs_cache: BfsCache,
+    paths: List[List[Coord]],
+    goals: List[Coord],
+    device: torch.device,
+    input_tensors: List[torch.Tensor],
+    delay_method: DelayMethod | None = None,
+) -> DenseDelayBatchItem:
+    """Build full-grid, per-agent targets for one episode (all agents).
+
+    delay_method defaults to NonOptimalPenaltyDelay: 0 on the agent's CBS-optimal
+    path, 1 everywhere else. Any DelayMethod that returns a full grid.shape array
+    works here.
+    """
+    method = delay_method or NonOptimalPenaltyDelay()
+    dense = np.stack(
+        [
+            method.compute(grid, bfs_cache, paths, goals, agent_idx=i)
+            for i in range(len(paths))
+        ]
+    ).astype(np.float32)
+    targets = torch.from_numpy(dense).to(device)
+    free_mask = torch.from_numpy(grid.astype(bool)).to(device)
+    return DenseDelayBatchItem(input_tensors, targets, free_mask)
 
 
 def prepare_delay_batch_item(
@@ -115,6 +157,151 @@ def _batch_delay_tables(model: Any, input_tensors: List[torch.Tensor]) -> torch.
     """Single batched forward pass for all agents."""
     batched = torch.cat(input_tensors, dim=0)  # (num_agents, C, H, W)
     return model(batched).squeeze(1)  # (num_agents, H, W)
+
+
+def _batch_delay_logits(model: Any, input_tensors: List[torch.Tensor]) -> torch.Tensor:
+    """Single batched forward pass returning pre-activation logits (for BCEWithLogitsLoss)."""
+    batched = torch.cat(input_tensors, dim=0)  # (num_agents, C, H, W)
+    return model.forward_logits(batched).squeeze(1)  # (num_agents, H, W)
+
+
+def update_dense_delay_from_batch(
+    model: Any,
+    optimizer: Any,
+    batch: Sequence[DenseDelayBatchItem],
+    pos_weight: float = 0.05,
+) -> float:
+    """Dense counterpart of update_delay_from_batch: BCEWithLogitsLoss over every
+    free cell of the grid (not just path cells), for every agent.
+
+    pos_weight scales the majority class (label 1 = "off optimal path") down
+    relative to the minority class (label 0 = "on path"), since that majority
+    otherwise dominates the loss. Start with inverse class frequency and tune.
+    """
+    if not batch:
+        return float("nan")
+    model.train()
+    optimizer.zero_grad()
+    total_loss = 0.0
+
+    for item in batch:
+        logits = _batch_delay_logits(model, item.input_tensors)
+        mask = item.free_mask.unsqueeze(0).expand_as(logits)
+        weight = torch.tensor(pos_weight, device=logits.device)
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            logits[mask], item.targets[mask], pos_weight=weight
+        )
+        loss.backward()
+        total_loss += loss.item()
+
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    optimizer.step()
+    return total_loss / len(batch)
+
+
+def eval_dense_delay_loss(
+    model: Any,
+    batch: Sequence[DenseDelayBatchItem],
+    pos_weight: float = 0.05,
+) -> float:
+    """Compute mean dense BCE loss over a batch without updating model weights."""
+    if not batch:
+        return float("nan")
+    model.eval()
+    total_loss = 0.0
+    with torch.no_grad():
+        for item in batch:
+            logits = _batch_delay_logits(model, item.input_tensors)
+            mask = item.free_mask.unsqueeze(0).expand_as(logits)
+            weight = torch.tensor(pos_weight, device=logits.device)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                logits[mask], item.targets[mask], pos_weight=weight
+            )
+            total_loss += loss.item()
+    return total_loss / len(batch)
+
+
+def trivial_baseline_dense_loss(
+    batch: Sequence[DenseDelayBatchItem],
+    pos_weight: float = 0.05,
+) -> float:
+    """BCE loss of a constant "always predict off-path" model — the class-imbalance
+    floor that any trained model's loss should be compared against."""
+    if not batch:
+        return float("nan")
+    total_loss = 0.0
+    for item in batch:
+        mask = item.free_mask.unsqueeze(0).expand_as(item.targets)
+        logits = torch.full_like(item.targets, 10.0)  # sigmoid(10) ~= 1.0
+        weight = torch.tensor(pos_weight, device=item.targets.device)
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            logits[mask], item.targets[mask], pos_weight=weight
+        )
+        total_loss += loss.item()
+    return total_loss / len(batch)
+
+
+def compute_mask_iou_f1(
+    model: Any,
+    batch: Sequence[DenseDelayBatchItem],
+    threshold: float = 0.5,
+) -> tuple[float, float]:
+    """IoU/F1 between the predicted "on-path" mask (sigmoid output < threshold) and
+    the true CBS-path mask (target == 0), over free cells only, averaged over every
+    agent/instance in the batch.
+
+    This is the class-imbalance-robust metric: a model that always predicts
+    "off-path" gets BCE that looks deceptively good but IoU/F1 == 0 here.
+    """
+    if not batch:
+        return float("nan"), float("nan")
+    model.eval()
+    ious: list[float] = []
+    f1s: list[float] = []
+    with torch.no_grad():
+        for item in batch:
+            logits = _batch_delay_logits(model, item.input_tensors)
+            pred_on_path = torch.sigmoid(logits) < threshold
+            true_on_path = item.targets < 0.5
+            mask = item.free_mask.unsqueeze(0).expand_as(pred_on_path)
+            for agent_idx in range(pred_on_path.shape[0]):
+                p = pred_on_path[agent_idx][mask[agent_idx]]
+                t = true_on_path[agent_idx][mask[agent_idx]]
+                tp = int((p & t).sum())
+                fp = int((p & ~t).sum())
+                fn = int((~p & t).sum())
+                iou_denom = tp + fp + fn
+                ious.append(tp / iou_denom if iou_denom else 1.0)
+                f1_denom = 2 * tp + fp + fn
+                f1s.append(2 * tp / f1_denom if f1_denom else 1.0)
+    return float(np.mean(ious)), float(np.mean(f1s))
+
+
+def compute_cell_overlap(
+    train_batch: Sequence[DenseDelayBatchItem],
+    test_batch: Sequence[DenseDelayBatchItem],
+) -> float:
+    """Fraction of free cells visited (target == 0, "on path") in the test split
+    that were also visited somewhere in the train split.
+
+    High overlap plus high test IoU/F1 is a warning sign of memorization rather
+    than generalization (see task's train/test diagnostic requirement).
+    """
+
+    def _visited_cells(batch: Sequence[DenseDelayBatchItem]) -> set[tuple[int, int]]:
+        visited: set[tuple[int, int]] = set()
+        for item in batch:
+            on_path = (item.targets < 0.5).cpu().numpy()
+            for agent_mask in on_path:
+                ys, xs = np.nonzero(agent_mask)
+                visited.update(zip(ys.tolist(), xs.tolist()))
+        return visited
+
+    train_cells = _visited_cells(train_batch)
+    test_cells = _visited_cells(test_batch)
+    if not test_cells:
+        return float("nan")
+    return len(test_cells & train_cells) / len(test_cells)
 
 
 def _get_path_target_first_visit(path: Any) -> List[int]:

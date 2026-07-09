@@ -1,4 +1,5 @@
 """Subprocess wrapper for EECBS solver."""
+
 from __future__ import annotations
 
 import re
@@ -28,12 +29,17 @@ def run_eecbs(
         out_paths = Path(tmp) / "paths.txt"
         cmd = [
             str(eecbs_binary),
-            "-m", str(map_file),
-            "-a", str(scen_file),
-            "-o", str(out_csv),
+            "-m",
+            str(map_file),
+            "-a",
+            str(scen_file),
+            "-o",
+            str(out_csv),
             f"--outputPaths={out_paths}",
-            "-k", str(num_agents),
-            "-t", str(int(timeout_s)),
+            "-k",
+            str(num_agents),
+            "-t",
+            str(int(timeout_s)),
             f"--suboptimality={suboptimality}",
         ]
         try:
@@ -51,9 +57,7 @@ def run_eecbs(
         return _parse_paths(out_paths, expected_agents=num_agents)
 
 
-def _parse_paths(
-    path_file: Path, expected_agents: int
-) -> Optional[list[list[Coord]]]:
+def _parse_paths(path_file: Path, expected_agents: int) -> Optional[list[list[Coord]]]:
     agents: dict[int, list[Coord]] = {}
     with open(path_file) as f:
         for line in f:

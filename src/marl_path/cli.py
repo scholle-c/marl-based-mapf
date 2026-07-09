@@ -63,6 +63,50 @@ def main():
         default=0.1,
         help="Fraction of dataset instances used for validation (default: 0.1).",
     )
+    parser.add_argument(
+        "--delay-target",
+        type=str,
+        default=consts.DELAY_TARGET_FIRST_VISIT,
+        choices=[
+            consts.DELAY_TARGET_FIRST_VISIT,
+            consts.DELAY_TARGET_NON_OPTIMAL_PENALTY,
+        ],
+        help=(
+            f"'{consts.DELAY_TARGET_FIRST_VISIT}': sparse per-path-cell regression "
+            f"target, softplus head, MSE loss (original). "
+            f"'{consts.DELAY_TARGET_NON_OPTIMAL_PENALTY}': dense full-grid binary "
+            f"mask target, sigmoid head, BCE loss."
+        ),
+    )
+    parser.add_argument(
+        "--delay-method",
+        type=str,
+        default="non_optimal_penalty",
+        help=(
+            "Delay method name from marl_path.delay_methods.DELAY_METHODS, used "
+            f"to build dense targets when --delay-target={consts.DELAY_TARGET_NON_OPTIMAL_PENALTY}."
+        ),
+    )
+    parser.add_argument(
+        "--pos-weight",
+        type=float,
+        default=0.05,
+        help=(
+            "BCEWithLogitsLoss pos_weight for dense/non_optimal_penalty training. "
+            "Down-weights the majority 'off-path' class (label 1); start with "
+            "inverse class frequency and tune (default: 0.05)."
+        ),
+    )
+    parser.add_argument(
+        "--penalty-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Scale applied to the sigmoid delay output before adding it to h_bfs "
+            "at inference (DistTable.compute_delay_model). Only used for sigmoid "
+            "output heads (default: 1.0)."
+        ),
+    )
 
     # ── MAPF instance (required for lacam_only; optional eval for supervised_delay) ──
     parser.add_argument(
@@ -140,6 +184,7 @@ def main():
             consts.EXTRACTOR_BASIC,
             consts.EXTRACTOR_BINARY_AGENTS_CHANNEL,
             consts.EXTRACTOR_AGGREGATED_AGENTS_CHANNEL,
+            consts.EXTRACTOR_RICH_AGENTS_CHANNEL,
         ],
     )
     parser.add_argument(

@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from loguru import logger
 
 import marl_path.constants as consts
+from marl_path.model.definition import OutputActivation
 from marl_path.model import (
     DefaultModel,
     DistanceTableCNN,
@@ -20,6 +21,7 @@ from marl_path.model import (
     FeatureExtractor,
     BinaryAgentsChannelExtractor,
     AggregatedAgentsChannelExtractor,
+    RichAgentsChannelExtractor,
 )
 from marl_path.model.inference import save_checkpoint
 from marl_path.shared.mapf_utils import get_grid, get_scenario
@@ -60,6 +62,14 @@ class DefaultTrainingPipeline(DefaultPipeline):
     def __init__(self, args: argparse.Namespace):
         super().__init__(args)
         self.device: torch.device = _get_device(self.args.device)
+        delay_target = getattr(
+            self.args, "delay_target", consts.DELAY_TARGET_FIRST_VISIT
+        )
+        output_activation: OutputActivation = (
+            "sigmoid"
+            if delay_target == consts.DELAY_TARGET_NON_OPTIMAL_PENALTY
+            else "softplus"
+        )
         self.model, self.extractor = _initialize_model(
             self.args.model_file,
             self.device,
@@ -67,6 +77,7 @@ class DefaultTrainingPipeline(DefaultPipeline):
             grid=self.grid,
             seed=getattr(self.args, "seed_training", None),
             extractor_type=self.args.feature_extractor_type,
+            output_activation=output_activation,
         )
         self.training_stats = TrainingStats(
             training_mode=self.args.pipeline_mode,
@@ -113,6 +124,7 @@ def _initialize_model(
     grid=None,
     seed: int | None = None,
     extractor_type: str = consts.EXTRACTOR_BASIC,
+    output_activation: OutputActivation = "softplus",
 ) -> tuple[DefaultModel, FeatureExtractor]:
     if path is not None:
         return load_model(path, device=device)
@@ -127,10 +139,14 @@ def _initialize_model(
         extractor = BinaryAgentsChannelExtractor()
     elif extractor_type == consts.EXTRACTOR_AGGREGATED_AGENTS_CHANNEL:
         extractor = AggregatedAgentsChannelExtractor()
+    elif extractor_type == consts.EXTRACTOR_RICH_AGENTS_CHANNEL:
+        extractor = RichAgentsChannelExtractor()
     else:
         extractor = BasicExtractor()
 
-    model = DistanceTableCNN(in_channels=extractor.n_channels).to(device)
+    model = DistanceTableCNN(
+        in_channels=extractor.n_channels, output_activation=output_activation
+    ).to(device)
     if model_initialization_mode == 1:
         logger.info("applying pretraining on default values...")
         pretrain_optimizer = torch.optim.Adam(model.parameters(), lr=0.001)

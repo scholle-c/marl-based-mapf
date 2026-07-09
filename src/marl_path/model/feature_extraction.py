@@ -31,8 +31,14 @@ class FeatureExtractor(ABC):
         other_agents: list[tuple[int, int]],
         device: torch.device | None = None,
         bfs_tables: Optional[BfsTableMap] = None,
+        other_starts: Optional[list[tuple[int, int]]] = None,
     ) -> torch.Tensor:
-        """Return a tensor of shape (1, n_channels, H, W)."""
+        """Return a tensor of shape (1, n_channels, H, W).
+
+        other_starts (optional): other agents' start positions. Extractors that
+        don't use this signal (BasicExtractor, BinaryAgentsChannelExtractor) may
+        ignore it.
+        """
         ...
 
 
@@ -71,6 +77,7 @@ class BasicExtractor(FeatureExtractor):
         other_agents: list[tuple[int, int]],
         device: torch.device | None = None,
         bfs_tables: Optional[BfsTableMap] = None,
+        other_starts: Optional[list[tuple[int, int]]] = None,
     ) -> torch.Tensor:
         map_ch = grid.astype(np.float32, copy=False)
         goal_ch = np.zeros_like(map_ch)
@@ -107,6 +114,7 @@ class BinaryAgentsChannelExtractor(FeatureExtractor):
         other_agents: list[tuple[int, int]],
         device: torch.device | None = None,
         bfs_tables: Optional[BfsTableMap] = None,
+        other_starts: Optional[list[tuple[int, int]]] = None,
     ) -> torch.Tensor:
         map_ch = grid.astype(np.float32, copy=False)
         goal_ch = np.zeros_like(map_ch)
@@ -127,8 +135,37 @@ class BinaryAgentsChannelExtractor(FeatureExtractor):
         return tensor
 
 
+def _aggregate_bfs(
+    coords: list[tuple[int, int]],
+    bfs_tables: Optional[BfsTableMap],
+    template: np.ndarray,
+    norm: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sum/min BFS-distance channels over `coords`' BFS tables (both normalised by `norm`).
+
+    Sum: low value -> close to the goal/start area of many agents.
+    Min: low value -> close to at least one agent (agent count is lost).
+    Falls back to a binary marker channel (duplicated for sum/min) when bfs_tables is None.
+    """
+    if bfs_tables:
+        tables = [bfs_tables[c] for c in coords if c in bfs_tables]
+        if tables:
+            sum_ch = (np.sum(tables, axis=0) / norm).astype(np.float32)
+            min_ch = (np.minimum.reduce(tables) / norm).astype(np.float32)
+        else:
+            sum_ch = np.zeros_like(template)
+            min_ch = np.zeros_like(template)
+    else:
+        sum_ch = np.zeros_like(template)
+        min_ch = np.zeros_like(template)
+        for pos in coords:
+            sum_ch[pos] = 1.0
+            min_ch[pos] = 1.0
+    return sum_ch, min_ch
+
+
 class AggregatedAgentsChannelExtractor(FeatureExtractor):
-    """BasicExtractor plus BFS-sum and BFS-min channels over other agents.
+    """BasicExtractor plus BFS-sum and BFS-min channels over other agents' goals.
 
     Both channels are normalised by grid size so values stay in a comparable range.
     Channels: map, goal, start, summed_bfs, min_bfs [, y_rel, x_rel]
@@ -151,6 +188,7 @@ class AggregatedAgentsChannelExtractor(FeatureExtractor):
         other_agents: list[tuple[int, int]],
         device: torch.device | None = None,
         bfs_tables: Optional[BfsTableMap] = None,
+        other_starts: Optional[list[tuple[int, int]]] = None,
     ) -> torch.Tensor:
         map_ch = grid.astype(np.float32, copy=False)
         goal_ch = np.zeros_like(map_ch)
@@ -159,32 +197,71 @@ class AggregatedAgentsChannelExtractor(FeatureExtractor):
         start_ch[start] = 1.0
         norm = float(grid.size) or 1.0
 
-        # Sum up BFS tables of other agents, low value -> goal area of many agents
-        if bfs_tables:
-            bfs_sum_ch = sum(bfs_tables[g] for g in other_agents if g in bfs_tables)
-            if not isinstance(bfs_sum_ch, np.ndarray):
-                bfs_sum_ch = np.zeros_like(map_ch)
-            bfs_sum_ch = (bfs_sum_ch / norm).astype(np.float32)
-        else:
-            bfs_sum_ch = np.zeros_like(map_ch)
-            for pos in other_agents:
-                bfs_sum_ch[pos] = 1.0
-
-        # Take the min of the BFS tables, low value -> goal area of at least one agent (Count of agents gets lost here)
-        if bfs_tables:
-            tables = [bfs_tables[g] for g in other_agents if g in bfs_tables]
-            bfs_min_ch = np.minimum.reduce(tables) if tables else np.zeros_like(map_ch)
-
-            if not isinstance(bfs_min_ch, np.ndarray):
-                bfs_min_ch = np.zeros_like(map_ch)
-            bfs_min_ch = (bfs_min_ch / norm).astype(np.float32)
-        else:
-            bfs_min_ch = np.zeros_like(map_ch)
-            for pos in other_agents:
-                bfs_min_ch[pos] = 1.0
+        bfs_sum_ch, bfs_min_ch = _aggregate_bfs(other_agents, bfs_tables, map_ch, norm)
 
         tensor = torch.from_numpy(
             np.stack([map_ch, goal_ch, start_ch, bfs_sum_ch, bfs_min_ch])
+        ).unsqueeze(0)
+        if device is not None:
+            tensor = tensor.to(device)
+        if self._use_coord_channels:
+            tensor = _add_relative_coords(tensor, goal)
+        return tensor
+
+
+class RichAgentsChannelExtractor(FeatureExtractor):
+    """AggregatedAgentsChannelExtractor plus BFS-sum/min channels over other agents'
+    *start* positions, not just their goals.
+
+    NonOptimalPenaltyDelay-style targets depend on which alternative paths CBS
+    ruled out to avoid conflicts with other agents — that requires knowing where
+    other agents *start*, not only where they're headed. Channels: map, goal,
+    start, goal_bfs_sum, goal_bfs_min, start_bfs_sum, start_bfs_min [, y_rel, x_rel]
+    """
+
+    def __init__(self, use_coord_channels: bool = True):
+        self._use_coord_channels = use_coord_channels
+
+    @property
+    def n_channels(self) -> int:
+        return 9 if self._use_coord_channels else 7
+
+    def extract(
+        self,
+        grid: Grid,
+        goal: tuple[int, int],
+        start: tuple[int, int],
+        other_agents: list[tuple[int, int]],
+        device: torch.device | None = None,
+        bfs_tables: Optional[BfsTableMap] = None,
+        other_starts: Optional[list[tuple[int, int]]] = None,
+    ) -> torch.Tensor:
+        map_ch = grid.astype(np.float32, copy=False)
+        goal_ch = np.zeros_like(map_ch)
+        goal_ch[goal] = 1.0
+        start_ch = np.zeros_like(map_ch)
+        start_ch[start] = 1.0
+        norm = float(grid.size) or 1.0
+
+        goal_sum_ch, goal_min_ch = _aggregate_bfs(
+            other_agents, bfs_tables, map_ch, norm
+        )
+        start_sum_ch, start_min_ch = _aggregate_bfs(
+            other_starts or [], bfs_tables, map_ch, norm
+        )
+
+        tensor = torch.from_numpy(
+            np.stack(
+                [
+                    map_ch,
+                    goal_ch,
+                    start_ch,
+                    goal_sum_ch,
+                    goal_min_ch,
+                    start_sum_ch,
+                    start_min_ch,
+                ]
+            )
         ).unsqueeze(0)
         if device is not None:
             tensor = tensor.to(device)

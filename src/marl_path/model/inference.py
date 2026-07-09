@@ -11,6 +11,7 @@ from .feature_extraction import (
     BasicExtractor,
     BinaryAgentsChannelExtractor,
     AggregatedAgentsChannelExtractor,
+    RichAgentsChannelExtractor,
 )
 import torch
 import numpy as np
@@ -28,7 +29,10 @@ def save_checkpoint(
                 "class": type(extractor).__name__,
                 "use_coord_channels": getattr(extractor, "_use_coord_channels", True),
             },
-            "model_config": {"in_channels": extractor.n_channels},
+            "model_config": {
+                "in_channels": extractor.n_channels,
+                "output_activation": getattr(model, "output_activation", "softplus"),
+            },
         },
         path,
     )
@@ -44,15 +48,18 @@ def load_model(
     if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
         state_dict = checkpoint["state_dict"]
         extractor = _extractor_from_config(checkpoint.get("extractor"))
-        in_channels = checkpoint.get("model_config", {}).get(
-            "in_channels", extractor.n_channels
-        )
+        model_config = checkpoint.get("model_config", {})
+        in_channels = model_config.get("in_channels", extractor.n_channels)
+        output_activation = model_config.get("output_activation", "softplus")
     else:
         # Legacy format: bare state_dict saved with torch.save(model.state_dict(), path)
         state_dict = checkpoint
         extractor = BasicExtractor()
         in_channels = 5
-    model = DistanceTableCNN(in_channels=in_channels).to(device)
+        output_activation = "softplus"
+    model = DistanceTableCNN(
+        in_channels=in_channels, output_activation=output_activation
+    ).to(device)
     model.load_state_dict(state_dict)
     model.eval()
     return model, extractor
@@ -108,4 +115,6 @@ def _extractor_from_config(config: dict | None) -> FeatureExtractor:
         return BinaryAgentsChannelExtractor(use_coord_channels=use_coord)
     if cls_name == "AggregatedAgentsChannelExtractor":
         return AggregatedAgentsChannelExtractor(use_coord_channels=use_coord)
+    if cls_name == "RichAgentsChannelExtractor":
+        return RichAgentsChannelExtractor(use_coord_channels=use_coord)
     return BasicExtractor(use_coord_channels=use_coord)

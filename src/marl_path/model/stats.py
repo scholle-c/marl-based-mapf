@@ -131,6 +131,9 @@ class TrainingStats:
     _epoch_count: int = field(default=0, repr=False)
     _losses: List[float | None] = field(default_factory=list, repr=False)
     _val_losses: List[float | None] = field(default_factory=list, repr=False)
+    _extra_metrics: dict[str, List[float | None]] = field(
+        default_factory=dict, repr=False
+    )
 
     # ------------------------------------------------------------------ #
     # Recording                                                            #
@@ -142,14 +145,26 @@ class TrainingStats:
         soc: int | float | None = None,
         elapsed_time: float | None = None,
         val_loss: float | None = None,
+        extra: dict[str, float | None] | None = None,
     ) -> None:
-        """Record scalar metrics for one training epoch."""
+        """Record scalar metrics for one training epoch.
+
+        `extra` holds free-form named metrics (e.g. dense-mode's mask IoU/F1 and
+        trivial-baseline BCE) that get their own CSV column, padded with None for
+        epochs recorded before/without that metric.
+        """
         self._epoch_count += 1
         self._losses.append(loss)
         self._val_losses.append(val_loss)
         if self.mapf is not None:
             self.mapf.socs.append(soc)
             self.mapf.elapsed_times.append(elapsed_time)
+        for name in self._extra_metrics:
+            if extra is None or name not in extra:
+                self._extra_metrics[name].append(None)
+        for name, value in (extra or {}).items():
+            self._extra_metrics.setdefault(name, [None] * (self._epoch_count - 1))
+            self._extra_metrics[name].append(value)
 
     def record_dist_tables(
         self,
@@ -206,6 +221,7 @@ class TrainingStats:
             fieldnames.append("elapsed_time_ms")
         if has_diffs:
             fieldnames.append("dist_table_diff")
+        fieldnames.extend(self._extra_metrics.keys())
 
         with open(os.path.join(output_dir, _FILENAME_METRICS), "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -224,6 +240,8 @@ class TrainingStats:
                     row["elapsed_time_ms"] = elapsed_times[i]
                 if has_diffs:
                     row["dist_table_diff"] = self.dist_tables._diffs[i]  # type: ignore[union-attr]
+                for name, values in self._extra_metrics.items():
+                    row[name] = values[i] if i < len(values) else None
                 writer.writerow(row)
 
     # ------------------------------------------------------------------ #

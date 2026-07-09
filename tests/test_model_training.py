@@ -8,68 +8,23 @@ from marl_path.model.definition import DistanceTableCNN
 from marl_path.model.training import (
     pretrain_on_default_value,
     _get_via_coordinates,
-    _get_targets_for_path,
-    train_vdn_on_solution,
-    _remove_waiting_from_path
+    _get_path_target_first_visit,
 )
 
 
 SKIP_PRETRAIN_TEST = True
 
 
-def test_get_path_target():
-    """
-    Test the _get_path_target function with a sample path and distance table.
-    """
+def test_get_path_target_first_visit():
+    """First-visit target: total_path_length - t_first_visit(v) for each path cell."""
+    path = [(2, 0), (1, 0), (0, 0)]
+    path2 = [(1, 1), (1, 2), (1, 3), (1, 2), (2, 2)]
 
-    # Sample path: (y, x) coordinates
-    path = [(2, 0), (1, 0), (1, 0), (0, 0), (0, 0)]
-    path2 = [(1,1), (1,2), (1,2), (1,3), (1,2), (2,2)]
-    path_goal_overlapping = [(1, 0), (0, 0), (0, 1), (0, 1), (0, 0), (0, 0)]
-
-    # Expected targets
     expected_targets = [2, 1, 0]
-    expected_targets2 = [4, 1, 2, 0]
-    expected_targets_goal_overlapping = [3, 0, 1]
+    expected_targets2 = [4, 3, 2, 3, 0]
 
-    # Remove waiting from path and get targets for path
-    path = _remove_waiting_from_path(path)
-    path2 = _remove_waiting_from_path(path2)
-    path_goal_overlapping = _remove_waiting_from_path(path_goal_overlapping)
-
-    # Call the function
-    targets = _get_targets_for_path(path)
-    targets2 = _get_targets_for_path(path2)
-    targets_goal_overlapping = _get_targets_for_path(path_goal_overlapping)
-    # Assertions
-    assert list(targets.values()) == expected_targets, (
-        f"Expected targets {expected_targets}, got {targets}"
-    )
-    assert list(targets2.values()) == expected_targets2, (
-        f"Expected targets {expected_targets2}, got {targets2}"
-    )
-    assert list(targets_goal_overlapping.values()) == expected_targets_goal_overlapping, (
-        f"Expected targets {expected_targets_goal_overlapping}, got {targets_goal_overlapping}"
-    )
-
-
-def test_values_targets_match():
-    """ Check whether the values are associated with the correct targets. """
-    path = [(2, 1), (2, 0), (2, 0), (1, 0), (1, 0), (0, 0), (0, 0), (0, 0)]
-
-    dist_table = torch.tensor([[0, 1], 
-                               [1, 2], 
-                               [2, 3]], dtype=torch.float32)
-
-    path = _remove_waiting_from_path(path)
-
-    values: torch.Tensor = _get_via_coordinates(dist_table, path)
-    targets_int = list(_get_targets_for_path(path).values())
-    targets: torch.Tensor = torch.tensor(targets_int, dtype=torch.float32, device="cpu", requires_grad=False)
-
-    for v, t in zip(values, targets):
-        assert torch.isclose(v, t), f"Value {v.item()} does not match target {t.item()}"
-
+    assert _get_path_target_first_visit(path) == expected_targets
+    assert _get_path_target_first_visit(path2) == expected_targets2
 
 
 def test_get_via_coordinates():

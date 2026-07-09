@@ -7,6 +7,7 @@ Usage:
         --output-dir data/random-32-32-20 \\
         --num-agents 30 --subsets-per-scen 10 --timeout 60 --suboptimality 1.2
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,7 +37,9 @@ def _read_scen_data_lines(scen_file: Path) -> list[str]:
     return lines
 
 
-def _write_subset_scen(data_lines: list[str], indices: list[int], out_path: Path) -> None:
+def _write_subset_scen(
+    data_lines: list[str], indices: list[int], out_path: Path
+) -> None:
     """Write a new scen file containing only the agents at the given indices."""
     with open(out_path, "w") as f:
         f.write("version 1\n")
@@ -106,7 +109,14 @@ def generate(
                 tmp_path = Path(tmp.name)
             try:
                 _write_subset_scen(data_lines, agent_indices, tmp_path)
-                paths = run_eecbs(eecbs_binary, map_file, tmp_path, num_agents, timeout_s, suboptimality)
+                paths = run_eecbs(
+                    eecbs_binary,
+                    map_file,
+                    tmp_path,
+                    num_agents,
+                    timeout_s,
+                    suboptimality,
+                )
             finally:
                 tmp_path.unlink(missing_ok=True)
 

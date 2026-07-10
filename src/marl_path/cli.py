@@ -188,6 +188,18 @@ def main():
         ],
     )
     parser.add_argument(
+        "--hidden-channels",
+        type=int,
+        default=32,
+        help="Conv channel width of DistanceTableCNN (default: 32).",
+    )
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=4,
+        help="Number of conv blocks in DistanceTableCNN (default: 4).",
+    )
+    parser.add_argument(
         "--model-file",
         type=Path,
         default=None,

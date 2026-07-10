@@ -78,6 +78,8 @@ class DefaultTrainingPipeline(DefaultPipeline):
             seed=getattr(self.args, "seed_training", None),
             extractor_type=self.args.feature_extractor_type,
             output_activation=output_activation,
+            hidden_channels=getattr(self.args, "hidden_channels", 32),
+            depth=getattr(self.args, "depth", 4),
         )
         self.training_stats = TrainingStats(
             training_mode=self.args.pipeline_mode,
@@ -89,6 +91,9 @@ class DefaultTrainingPipeline(DefaultPipeline):
             ),
         )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode="min", factor=0.5, patience=10, min_lr=1e-6
+        )
 
     def store_results(self) -> None:
         if self.args.record_mode != 0:
@@ -125,6 +130,8 @@ def _initialize_model(
     seed: int | None = None,
     extractor_type: str = consts.EXTRACTOR_BASIC,
     output_activation: OutputActivation = "softplus",
+    hidden_channels: int = 32,
+    depth: int = 4,
 ) -> tuple[DefaultModel, FeatureExtractor]:
     if path is not None:
         return load_model(path, device=device)
@@ -145,7 +152,10 @@ def _initialize_model(
         extractor = BasicExtractor()
 
     model = DistanceTableCNN(
-        in_channels=extractor.n_channels, output_activation=output_activation
+        in_channels=extractor.n_channels,
+        hidden_channels=hidden_channels,
+        depth=depth,
+        output_activation=output_activation,
     ).to(device)
     if model_initialization_mode == 1:
         logger.info("applying pretraining on default values...")

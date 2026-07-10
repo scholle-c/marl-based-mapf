@@ -300,6 +300,16 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
                 _track_b_log_suffix(eval_summary) if eval_summary is not None else "",
             )
 
+            lr_before = self.optimizer.param_groups[0]["lr"]
+            self.scheduler.step(val_loss)
+            lr_after = self.optimizer.param_groups[0]["lr"]
+            if lr_after < lr_before:
+                logger.info(
+                    "  LR reduced: {:.2e} -> {:.2e} (val loss plateaued)",
+                    lr_before,
+                    lr_after,
+                )
+
     # ------------------------------------------------------------------ #
     # Shared helpers                                                        #
     # ------------------------------------------------------------------ #

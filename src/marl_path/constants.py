@@ -28,17 +28,13 @@ COMPARISON_ALGO_IMITATION_MODEL: str = "imitation_model"
 # Pipeline modes
 PIPELINE_MODE_SUPERVISED_DELAY: str = "supervised_delay"
 PIPELINE_MODE_LACAM_ONLY: str = "lacam_only"
+PIPELINE_MODE_EVAL_ONLY: str = "eval_only"
 
 # Extractor types
 EXTRACTOR_BASIC: str = "basic"
 EXTRACTOR_BINARY_AGENTS_CHANNEL: str = "binary_agents_channel"
 EXTRACTOR_AGGREGATED_AGENTS_CHANNEL: str = "aggregated_agents_channel"
 EXTRACTOR_RICH_AGENTS_CHANNEL: str = "rich_agents_channel"
-
-# Delay targets (supervised_delay pipeline mode)
-DELAY_TARGET_FIRST_VISIT: str = (
-    "first_visit"  # sparse, softplus head, MSE loss (original)
-)
-DELAY_TARGET_NON_OPTIMAL_PENALTY: str = (
-    "non_optimal_penalty"  # dense, sigmoid head, BCE loss
-)
+EXTRACTOR_COLLISION_AWARE: str = "collision_aware"
+EXTRACTOR_PATH_ALL_AGENTS: str = "path_all_agents"
+EXTRACTOR_PATH_COLLIDING_AGENTS: str = "path_colliding_agents"

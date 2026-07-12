@@ -18,12 +18,24 @@ import numpy as np
 from loguru import logger
 
 from marl_path.shared.mapf_utils import get_grid, get_scenario
-from marl_path.model.training import _compute_bfs_table, _get_path_target_first_visit
+from marl_path.model.training import _compute_bfs_table
 
 from .cbs_runner import run_eecbs
 from .instance import CachedInstance
 
 _DEFAULT_EECBS = Path(__file__).parent.parent.parent.parent.parent / "EECBS" / "eecbs"
+
+
+def _first_visit_targets(path: list) -> list[int]:
+    """target(v) = total_path_length - t_first_visit(v) for each step of path.
+
+    Used only to log how far CBS paths deviate from pure BFS below.
+    """
+    total_length = len(path) - 1
+    first_visit: dict = {}
+    for t, coord in enumerate(path):
+        first_visit.setdefault(coord, t)
+    return [total_length - first_visit[coord] for coord in path]
 
 
 def _read_scen_data_lines(scen_file: Path) -> list[str]:
@@ -140,7 +152,7 @@ def generate(
             # Measure delay distribution: delay(v) = h_total(v) - h_bfs(v)
             for i, path in enumerate(paths):
                 bfs = _compute_bfs_table(grid, goals[i])
-                targets = _get_path_target_first_visit(path)
+                targets = _first_visit_targets(path)
                 for coord, t in zip(path, targets):
                     total_path_cells += 1
                     if t - bfs[coord] > 1e-6:

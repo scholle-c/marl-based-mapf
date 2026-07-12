@@ -2,12 +2,8 @@
 
 from .definition import DistanceTableCNN, DefaultModel
 from .training import (
-    prepare_delay_batch_item,
-    update_delay_from_batch,
-    eval_delay_loss,
     pretrain_on_default_value,
     pretrain_on_bfs,
-    DelayBatchItem,
     DenseDelayBatchItem,
     prepare_dense_delay_batch_item,
     update_dense_delay_from_batch,
@@ -26,6 +22,8 @@ from .feature_extraction import (
     BinaryAgentsChannelExtractor,
     AggregatedAgentsChannelExtractor,
     RichAgentsChannelExtractor,
+    CollisionAwareAgentsChannelExtractor,
+    PathMembershipAgentsChannelExtractor,
 )
 
 __all__ = [
@@ -35,10 +33,6 @@ __all__ = [
     "save_checkpoint",
     "build_input_tensor",
     "build_random_input_tensor",
-    "prepare_delay_batch_item",
-    "update_delay_from_batch",
-    "eval_delay_loss",
-    "DelayBatchItem",
     "DenseDelayBatchItem",
     "prepare_dense_delay_batch_item",
     "update_dense_delay_from_batch",
@@ -56,4 +50,6 @@ __all__ = [
     "BinaryAgentsChannelExtractor",
     "AggregatedAgentsChannelExtractor",
     "RichAgentsChannelExtractor",
+    "CollisionAwareAgentsChannelExtractor",
+    "PathMembershipAgentsChannelExtractor",
 ]

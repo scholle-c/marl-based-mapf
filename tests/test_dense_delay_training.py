@@ -1,4 +1,4 @@
-"""Tests for the dense NonOptimalPenaltyDelay training path (task_non_optimal_penalty_learning.md)."""
+"""Tests for the dense NonOptimalPenaltyDelay training path."""
 import tempfile
 from pathlib import Path
 
@@ -43,28 +43,20 @@ def _dense_item(extractor=None, device=torch.device("cpu")) -> DenseDelayBatchIt
     return prepare_dense_delay_batch_item(GRID, bfs_cache, PATHS, GOALS, device, input_tensors)
 
 
-# ── DistanceTableCNN output_activation ────────────────────────────────────────
+# ── DistanceTableCNN sigmoid head ──────────────────────────────────────────────
 
 
 def test_sigmoid_head_output_in_unit_interval():
-    model = DistanceTableCNN(in_channels=5, output_activation="sigmoid")
+    model = DistanceTableCNN(in_channels=5)
     x = torch.randn(2, 5, 4, 4)
     out = model(x)
     assert torch.all(out >= 0.0) and torch.all(out <= 1.0)
 
 
 def test_forward_logits_matches_forward_for_sigmoid():
-    model = DistanceTableCNN(in_channels=5, output_activation="sigmoid")
+    model = DistanceTableCNN(in_channels=5)
     x = torch.randn(2, 5, 4, 4)
     assert torch.allclose(torch.sigmoid(model.forward_logits(x)), model(x))
-
-
-def test_softplus_head_is_default_and_unchanged():
-    model = DistanceTableCNN(in_channels=5)
-    assert model.output_activation == "softplus"
-    x = torch.randn(2, 5, 4, 4)
-    out = model(x)
-    assert torch.all(out >= 0.0)
 
 
 # ── NonOptimalPenaltyDelay dense targets ──────────────────────────────────────
@@ -90,7 +82,7 @@ def test_prepare_dense_delay_batch_item_shapes():
 
 
 def test_update_dense_delay_from_batch_runs_and_reduces_param_grad():
-    model = DistanceTableCNN(in_channels=5, output_activation="sigmoid")
+    model = DistanceTableCNN(in_channels=5)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     batch = [_dense_item()]
     loss = update_dense_delay_from_batch(model, optimizer, batch, pos_weight=0.1)
@@ -98,7 +90,7 @@ def test_update_dense_delay_from_batch_runs_and_reduces_param_grad():
 
 
 def test_eval_dense_delay_loss_matches_manual_bce():
-    model = DistanceTableCNN(in_channels=5, output_activation="sigmoid")
+    model = DistanceTableCNN(in_channels=5)
     batch = [_dense_item()]
     loss = eval_dense_delay_loss(model, batch, pos_weight=0.2)
     assert np.isfinite(loss) and loss > 0
@@ -121,7 +113,7 @@ def test_trivial_baseline_prefers_majority_class():
 
 def test_compute_mask_iou_f1_perfect_prediction():
     """A model whose logits exactly encode the true mask should get IoU=F1=1."""
-    model = DistanceTableCNN(in_channels=5, output_activation="sigmoid")
+    model = DistanceTableCNN(in_channels=5)
     item = _dense_item()
 
     class _PerfectModel(torch.nn.Module):
@@ -224,7 +216,7 @@ def test_cbs_dataset_dense_mode_end_to_end():
         npz_path = tmp_path / "instance_00.npz"
         instance.save(npz_path)
 
-        dataset = CbsDataset(tmp_path, mode="dense")
+        dataset = CbsDataset(tmp_path)
         assert len(dataset) == 1
         item = dataset[0]
         assert isinstance(item, DenseDelayBatchItem)
@@ -233,27 +225,3 @@ def test_cbs_dataset_dense_mode_end_to_end():
             assert item.targets[0][coord] == 0.0
         for coord in PATHS[1]:
             assert item.targets[1][coord] == 0.0
-
-
-def test_cbs_dataset_sparse_mode_regression_unchanged():
-    """The original sparse path (default mode) must keep working unchanged."""
-    from marl_path.model.training import DelayBatchItem
-
-    starts = [(0, 0), (3, 3)]
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        map_file = tmp_path / "test.map"
-        scen_file = tmp_path / "test.scen"
-        _write_map(map_file, GRID)
-        _write_scen(scen_file, "test.map", starts, GOALS)
-
-        instance = CachedInstance(
-            map_file=str(map_file), scen_file=str(scen_file),
-            agent_indices=[0, 1], paths=PATHS,
-        )
-        instance.save(tmp_path / "instance_00.npz")
-
-        dataset = CbsDataset(tmp_path)  # default mode="sparse"
-        item = dataset[0]
-        assert isinstance(item, DelayBatchItem)
-        assert item.targets.shape[0] == len(PATHS[0]) + len(PATHS[1])

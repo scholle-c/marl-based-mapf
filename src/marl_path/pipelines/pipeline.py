@@ -7,6 +7,7 @@ import marl_path.constants as consts
 
 from .comparison import ComparisonPipeline
 from .supervised_delay import SupervisedDelayPipeline
+from .eval_only import EvalOnlyPipeline
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
@@ -25,10 +26,13 @@ def run_pipeline(args: argparse.Namespace) -> None:
         pipeline = ComparisonPipeline(args)
     elif args.pipeline_mode == consts.PIPELINE_MODE_SUPERVISED_DELAY:
         pipeline = SupervisedDelayPipeline(args)
+    elif args.pipeline_mode == consts.PIPELINE_MODE_EVAL_ONLY:
+        pipeline = EvalOnlyPipeline(args)
     else:
         raise ValueError(
             f"Unknown pipeline mode '{args.pipeline_mode}'. "
-            f"Choose from: {consts.PIPELINE_MODE_SUPERVISED_DELAY}, {consts.PIPELINE_MODE_LACAM_ONLY}"
+            f"Choose from: {consts.PIPELINE_MODE_SUPERVISED_DELAY}, "
+            f"{consts.PIPELINE_MODE_LACAM_ONLY}, {consts.PIPELINE_MODE_EVAL_ONLY}"
         )
 
     pipeline.run_model_training()

@@ -12,6 +12,8 @@ from .feature_extraction import (
     BinaryAgentsChannelExtractor,
     AggregatedAgentsChannelExtractor,
     RichAgentsChannelExtractor,
+    CollisionAwareAgentsChannelExtractor,
+    PathMembershipAgentsChannelExtractor,
 )
 import torch
 import numpy as np
@@ -21,17 +23,21 @@ from typing import Any
 def save_checkpoint(
     model: DefaultModel, extractor: FeatureExtractor, path: str
 ) -> None:
-    """Save model weights and extractor config together."""
+    """Save model weights, extractor config, and model architecture together."""
+    hidden_channels = getattr(model, "_hidden_channels", None)
+    depth = getattr(model, "_depth", None)
     torch.save(
         {
             "state_dict": model.state_dict(),
             "extractor": {
                 "class": type(extractor).__name__,
                 "use_coord_channels": getattr(extractor, "_use_coord_channels", True),
+                "agents_filter": getattr(extractor, "_agents_filter", None),
             },
             "model_config": {
                 "in_channels": extractor.n_channels,
-                "output_activation": getattr(model, "output_activation", "softplus"),
+                "hidden_channels": hidden_channels,
+                "depth": depth,
             },
         },
         path,
@@ -50,15 +56,17 @@ def load_model(
         extractor = _extractor_from_config(checkpoint.get("extractor"))
         model_config = checkpoint.get("model_config", {})
         in_channels = model_config.get("in_channels", extractor.n_channels)
-        output_activation = model_config.get("output_activation", "softplus")
+        hidden_channels = model_config.get("hidden_channels") or 32
+        depth = model_config.get("depth") or 4
     else:
         # Legacy format: bare state_dict saved with torch.save(model.state_dict(), path)
         state_dict = checkpoint
         extractor = BasicExtractor()
         in_channels = 5
-        output_activation = "softplus"
+        hidden_channels = 32
+        depth = 4
     model = DistanceTableCNN(
-        in_channels=in_channels, output_activation=output_activation
+        in_channels=in_channels, hidden_channels=hidden_channels, depth=depth
     ).to(device)
     model.load_state_dict(state_dict)
     model.eval()
@@ -117,4 +125,11 @@ def _extractor_from_config(config: dict | None) -> FeatureExtractor:
         return AggregatedAgentsChannelExtractor(use_coord_channels=use_coord)
     if cls_name == "RichAgentsChannelExtractor":
         return RichAgentsChannelExtractor(use_coord_channels=use_coord)
+    if cls_name == "CollisionAwareAgentsChannelExtractor":
+        return CollisionAwareAgentsChannelExtractor(use_coord_channels=use_coord)
+    if cls_name == "PathMembershipAgentsChannelExtractor":
+        agents_filter = config.get("agents_filter") or "all"
+        return PathMembershipAgentsChannelExtractor(
+            agents_filter=agents_filter, use_coord_channels=use_coord
+        )
     return BasicExtractor(use_coord_channels=use_coord)

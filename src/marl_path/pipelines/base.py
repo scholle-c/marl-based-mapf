@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from loguru import logger
 
 import marl_path.constants as consts
-from marl_path.model.definition import OutputActivation
 from marl_path.model import (
     DefaultModel,
     DistanceTableCNN,
@@ -22,6 +21,8 @@ from marl_path.model import (
     BinaryAgentsChannelExtractor,
     AggregatedAgentsChannelExtractor,
     RichAgentsChannelExtractor,
+    CollisionAwareAgentsChannelExtractor,
+    PathMembershipAgentsChannelExtractor,
 )
 from marl_path.model.inference import save_checkpoint
 from marl_path.shared.mapf_utils import get_grid, get_scenario
@@ -62,14 +63,6 @@ class DefaultTrainingPipeline(DefaultPipeline):
     def __init__(self, args: argparse.Namespace):
         super().__init__(args)
         self.device: torch.device = _get_device(self.args.device)
-        delay_target = getattr(
-            self.args, "delay_target", consts.DELAY_TARGET_FIRST_VISIT
-        )
-        output_activation: OutputActivation = (
-            "sigmoid"
-            if delay_target == consts.DELAY_TARGET_NON_OPTIMAL_PENALTY
-            else "softplus"
-        )
         self.model, self.extractor = _initialize_model(
             self.args.model_file,
             self.device,
@@ -77,7 +70,6 @@ class DefaultTrainingPipeline(DefaultPipeline):
             grid=self.grid,
             seed=getattr(self.args, "seed_training", None),
             extractor_type=self.args.feature_extractor_type,
-            output_activation=output_activation,
             hidden_channels=getattr(self.args, "hidden_channels", 32),
             depth=getattr(self.args, "depth", 4),
         )
@@ -129,7 +121,6 @@ def _initialize_model(
     grid=None,
     seed: int | None = None,
     extractor_type: str = consts.EXTRACTOR_BASIC,
-    output_activation: OutputActivation = "softplus",
     hidden_channels: int = 32,
     depth: int = 4,
 ) -> tuple[DefaultModel, FeatureExtractor]:
@@ -148,6 +139,12 @@ def _initialize_model(
         extractor = AggregatedAgentsChannelExtractor()
     elif extractor_type == consts.EXTRACTOR_RICH_AGENTS_CHANNEL:
         extractor = RichAgentsChannelExtractor()
+    elif extractor_type == consts.EXTRACTOR_COLLISION_AWARE:
+        extractor = CollisionAwareAgentsChannelExtractor()
+    elif extractor_type == consts.EXTRACTOR_PATH_ALL_AGENTS:
+        extractor = PathMembershipAgentsChannelExtractor(agents_filter="all")
+    elif extractor_type == consts.EXTRACTOR_PATH_COLLIDING_AGENTS:
+        extractor = PathMembershipAgentsChannelExtractor(agents_filter="colliding")
     else:
         extractor = BasicExtractor()
 
@@ -155,7 +152,6 @@ def _initialize_model(
         in_channels=extractor.n_channels,
         hidden_channels=hidden_channels,
         depth=depth,
-        output_activation=output_activation,
     ).to(device)
     if model_initialization_mode == 1:
         logger.info("applying pretraining on default values...")

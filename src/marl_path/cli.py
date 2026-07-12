@@ -43,10 +43,14 @@ def main():
         choices=[
             consts.PIPELINE_MODE_SUPERVISED_DELAY,
             consts.PIPELINE_MODE_LACAM_ONLY,
+            consts.PIPELINE_MODE_EVAL_ONLY,
         ],
         help=(
             f"'{consts.PIPELINE_MODE_SUPERVISED_DELAY}': train model on CBS-optimal dataset. "
-            f"'{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM baseline only."
+            f"'{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM baseline only. "
+            f"'{consts.PIPELINE_MODE_EVAL_ONLY}': evaluate a trained --model-file "
+            "(LaCAM with model vs. vanilla baseline vs. CBS-optimal) on --dataset-dir/test, "
+            "capped by --eval-limit."
         ),
     )
 
@@ -64,37 +68,19 @@ def main():
         help="Fraction of dataset instances used for validation (default: 0.1).",
     )
     parser.add_argument(
-        "--delay-target",
-        type=str,
-        default=consts.DELAY_TARGET_FIRST_VISIT,
-        choices=[
-            consts.DELAY_TARGET_FIRST_VISIT,
-            consts.DELAY_TARGET_NON_OPTIMAL_PENALTY,
-        ],
-        help=(
-            f"'{consts.DELAY_TARGET_FIRST_VISIT}': sparse per-path-cell regression "
-            f"target, softplus head, MSE loss (original). "
-            f"'{consts.DELAY_TARGET_NON_OPTIMAL_PENALTY}': dense full-grid binary "
-            f"mask target, sigmoid head, BCE loss."
-        ),
-    )
-    parser.add_argument(
         "--delay-method",
         type=str,
         default="non_optimal_penalty",
-        help=(
-            "Delay method name from marl_path.delay_methods.DELAY_METHODS, used "
-            f"to build dense targets when --delay-target={consts.DELAY_TARGET_NON_OPTIMAL_PENALTY}."
-        ),
+        help="Delay method name from marl_path.delay_methods.DELAY_METHODS, used to build the dense training target.",
     )
     parser.add_argument(
         "--pos-weight",
         type=float,
         default=0.05,
         help=(
-            "BCEWithLogitsLoss pos_weight for dense/non_optimal_penalty training. "
-            "Down-weights the majority 'off-path' class (label 1); start with "
-            "inverse class frequency and tune (default: 0.05)."
+            "BCEWithLogitsLoss pos_weight. Down-weights the majority 'off-path' "
+            "class (label 1); start with inverse class frequency and tune "
+            "(default: 0.05)."
         ),
     )
     parser.add_argument(
@@ -103,8 +89,7 @@ def main():
         default=1.0,
         help=(
             "Scale applied to the sigmoid delay output before adding it to h_bfs "
-            "at inference (DistTable.compute_delay_model). Only used for sigmoid "
-            "output heads (default: 1.0)."
+            "at inference (DistTable.compute_delay_model) (default: 1.0)."
         ),
     )
 
@@ -174,6 +159,15 @@ def main():
         default=5,
         help="Number of LaCAM runs per Track B eval to average SOC over (default: 5).",
     )
+    parser.add_argument(
+        "--eval-limit",
+        type=int,
+        default=None,
+        help=(
+            "eval_only mode: cap the number of test instances evaluated "
+            "(default: all instances in --dataset-dir/test)."
+        ),
+    )
 
     # ── Model initialisation ────────────────────────────────────────────────
     parser.add_argument(
@@ -185,6 +179,9 @@ def main():
             consts.EXTRACTOR_BINARY_AGENTS_CHANNEL,
             consts.EXTRACTOR_AGGREGATED_AGENTS_CHANNEL,
             consts.EXTRACTOR_RICH_AGENTS_CHANNEL,
+            consts.EXTRACTOR_COLLISION_AWARE,
+            consts.EXTRACTOR_PATH_ALL_AGENTS,
+            consts.EXTRACTOR_PATH_COLLIDING_AGENTS,
         ],
     )
     parser.add_argument(
@@ -241,6 +238,11 @@ def main():
     elif args.pipeline_mode == consts.PIPELINE_MODE_LACAM_ONLY:
         if args.map_file is None or args.scen_file is None:
             parser.error("--map-file and --scen-file are required for lacam_only mode.")
+    elif args.pipeline_mode == consts.PIPELINE_MODE_EVAL_ONLY:
+        if args.dataset_dir is None:
+            parser.error("--dataset-dir is required for eval_only mode.")
+        if args.model_file is None:
+            parser.error("--model-file is required for eval_only mode.")
 
     run_pipeline(args)
 

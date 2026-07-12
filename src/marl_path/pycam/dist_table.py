@@ -51,9 +51,7 @@ class DistTable:
         with torch.no_grad():
             output: torch.Tensor = self.model(self.input_tensor)  # type: ignore
         delay: np.ndarray = output.squeeze(0).squeeze(0).cpu().numpy()
-        # Sigmoid heads output a [0,1] probability — the actual penalty magnitude
-        # added to h_bfs is an explicit, independently-tunable scale (unlike the
-        # softplus head, which bakes DELAY_SCALE into the activation itself).
-        if getattr(self.model, "output_activation", "softplus") == "sigmoid":
-            delay = delay * self.penalty_scale
+        # Model outputs a [0,1] probability — the actual penalty magnitude added
+        # to h_bfs is an explicit, independently-tunable scale.
+        delay = delay * self.penalty_scale
         return delay  # type: ignore

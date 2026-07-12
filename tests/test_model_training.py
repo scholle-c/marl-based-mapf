@@ -5,42 +5,11 @@ import torch
 import numpy as np
 from marl_path.model.utils import build_random_input_tensor
 from marl_path.model.definition import DistanceTableCNN
-from marl_path.model.training import (
-    pretrain_on_default_value,
-    _get_via_coordinates,
-    _get_path_target_first_visit,
-)
+from marl_path.model.training import pretrain_on_default_value
 
 
 SKIP_PRETRAIN_TEST = True
 
-
-def test_get_path_target_first_visit():
-    """First-visit target: total_path_length - t_first_visit(v) for each path cell."""
-    path = [(2, 0), (1, 0), (0, 0)]
-    path2 = [(1, 1), (1, 2), (1, 3), (1, 2), (2, 2)]
-
-    expected_targets = [2, 1, 0]
-    expected_targets2 = [4, 3, 2, 3, 0]
-
-    assert _get_path_target_first_visit(path) == expected_targets
-    assert _get_path_target_first_visit(path2) == expected_targets2
-
-
-def test_get_via_coordinates():
-    """
-    Test the _get_via_coordinates function with a sample 2D array and coordinates.
-    """
-
-    arr = np.array([[10, 20, 30], [40, 50, 60], [70, 80, 90]])
-    coords = [(0, 1), (1, 2), (2, 0)]  # Should access elements 20, 60, 70
-
-    expected_values = np.array([20, 60, 70])
-    values = _get_via_coordinates(arr, coords)
-
-    assert np.array_equal(values, expected_values), (
-        f"Expected {expected_values}, got {values}"
-    )
 
 def test_get_soc():
     """

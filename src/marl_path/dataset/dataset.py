@@ -3,34 +3,23 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Optional
 
-import numpy as np
 import torch
 from torch.utils.data import Dataset
 
 from marl_path.shared.mapf_utils import BfsCache, get_grid, get_scenario
 from marl_path.delay_methods import DelayMethod
 from marl_path.model.feature_extraction import BasicExtractor, FeatureExtractor
-from marl_path.model.training import (
-    DelayBatchItem,
-    DenseDelayBatchItem,
-    prepare_dense_delay_batch_item,
-    _get_path_target_first_visit,
-    _get_via_coordinates,
-)
+from marl_path.model.training import DenseDelayBatchItem, prepare_dense_delay_batch_item
 from .instance import CachedInstance
-
-DatasetMode = Literal["sparse", "dense"]
 
 
 class CbsDataset(Dataset):
     """Dataset of CBS-optimal MAPF solutions for supervised delay training.
 
-    mode="sparse" (default): each item is a DelayBatchItem (FirstVisitDelay-style,
-        per-path-cell targets), compatible with update_delay_from_batch.
-    mode="dense": each item is a DenseDelayBatchItem (full-grid, per-cell targets,
-        e.g. NonOptimalPenaltyDelay), compatible with update_dense_delay_from_batch.
+    Each item is a DenseDelayBatchItem: a full-grid, per-agent delay target
+    built by `delay_method` (default NonOptimalPenaltyDelay).
 
     Input tensors are built at load time via the extractor so swapping
     extractors does not require regenerating the cache.
@@ -41,13 +30,11 @@ class CbsDataset(Dataset):
         cache_dir: str | Path,
         extractor: Optional[FeatureExtractor] = None,
         device: Optional[torch.device] = None,
-        mode: DatasetMode = "sparse",
         delay_method: Optional[DelayMethod] = None,
     ):
         self._cache_dir = Path(cache_dir)
         self._extractor = extractor or BasicExtractor()
         self._device = device or torch.device("cpu")
-        self._mode: DatasetMode = mode
         self._delay_method = delay_method
         self._files = sorted(self._cache_dir.glob("*.npz"))
         if not self._files:
@@ -56,7 +43,7 @@ class CbsDataset(Dataset):
     def __len__(self) -> int:
         return len(self._files)
 
-    def __getitem__(self, idx: int) -> Union[DelayBatchItem, DenseDelayBatchItem]:
+    def __getitem__(self, idx: int) -> DenseDelayBatchItem:
         instance = CachedInstance.load(self._files[idx])
         grid = get_grid(instance.map_file)
         # agent_indices may be a non-contiguous subset, so load all and select.
@@ -71,16 +58,15 @@ class CbsDataset(Dataset):
         all_starts = [all_scen_starts[i] for i in instance.agent_indices]
 
         input_tensors: list[torch.Tensor] = []
-        bfs_distances: list[np.ndarray] = []
-        all_targets: list[float] = []
-
-        for i, path in enumerate(instance.paths):
+        for i in range(len(instance.paths)):
             goal = all_goals[i]
             other_goals = [all_goals[j] for j in range(len(all_goals)) if j != i]
             other_starts = [all_starts[j] for j in range(len(all_starts)) if j != i]
-            bfs_table = bfs_cache[goal]
             other_bfs = {g: bfs_cache[g] for g in other_goals}
             other_bfs.update({s: bfs_cache[s] for s in other_starts})
+            # Own goal's BFS table, needed by extractors that reconstruct this
+            # agent's individual shortest path (e.g. CollisionAwareAgentsChannelExtractor).
+            other_bfs[goal] = bfs_cache[goal]
 
             tensor = self._extractor.extract(
                 grid,
@@ -90,27 +76,16 @@ class CbsDataset(Dataset):
                 device=self._device,
                 bfs_tables=other_bfs,
                 other_starts=other_starts,
+                own_start=all_starts[i],
             )
             input_tensors.append(tensor)
 
-            if self._mode == "sparse":
-                bfs_distances.append(_get_via_coordinates(bfs_table, path))
-                all_targets.extend(_get_path_target_first_visit(path))
-
-        if self._mode == "dense":
-            return prepare_dense_delay_batch_item(
-                grid,
-                bfs_cache,
-                instance.paths,
-                all_goals,
-                self._device,
-                input_tensors,
-                self._delay_method,
-            )
-
-        target_tensor = torch.tensor(
-            all_targets, dtype=torch.float32, device=self._device
-        )
-        return DelayBatchItem(
-            input_tensors, instance.paths, bfs_distances, target_tensor
+        return prepare_dense_delay_batch_item(
+            grid,
+            bfs_cache,
+            instance.paths,
+            all_goals,
+            self._device,
+            input_tensors,
+            self._delay_method,
         )

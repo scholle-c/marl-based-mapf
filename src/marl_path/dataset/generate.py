@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from marl_path.shared.mapf_utils import get_grid, get_scenario
+from marl_path.shared.mapf_utils import get_grid, get_scenario, to_portable_path
 from marl_path.model.training import _compute_bfs_table
 
 from .cbs_runner import run_eecbs
@@ -142,8 +142,8 @@ def generate(
             goals = [all_goals[i] for i in agent_indices]
 
             instance = CachedInstance(
-                map_file=str(map_file),
-                scen_file=str(scen_file),
+                map_file=to_portable_path(map_file),
+                scen_file=to_portable_path(scen_file),
                 agent_indices=agent_indices,
                 paths=paths,
             )

@@ -12,6 +12,9 @@ from .mapf_utils import (
     Coord,
     Grid,
     get_neighbors,
+    PROJECT_ROOT,
+    to_portable_path,
+    resolve_portable_path,
 )
 from .config import load_config
 
@@ -29,4 +32,7 @@ __all__ = [
     "save_configs_for_visualizer",
     "validate_mapf_solution",
     "get_sum_of_loss",
+    "PROJECT_ROOT",
+    "to_portable_path",
+    "resolve_portable_path",
 ]

@@ -110,7 +110,6 @@ def eval_test_instances(
     npz_paths = sorted(test_dir.glob("*.npz"))
     if limit is not None:
         npz_paths = npz_paths[:limit]
-    
 
     for npz_path in npz_paths:
         n_instances += 1
@@ -144,7 +143,7 @@ def eval_test_instances(
             baseline_socs.append(b_soc)
         if m_soc is not None:
             model_socs.append(m_soc)
-        
+
         logger.info(
             "Test instance {}: soc_baseline={}  soc_model={}  soc_cbs={}",
             npz_path.name,

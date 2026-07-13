@@ -10,6 +10,32 @@ import numpy as np
 Grid: TypeAlias = np.ndarray
 Coord: TypeAlias = tuple[int, int]  # y, x
 
+# Repo root, used to make cached paths portable across machines/checkouts.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
+
+def to_portable_path(path: str | Path) -> str:
+    """Convert a path to repo-root-relative form when it lives inside the repo.
+
+    Used when persisting paths (e.g. into cached dataset .npz files) so the
+    cache stays valid if the repo is checked out somewhere else, e.g. on
+    another machine.
+    """
+    resolved = Path(path).resolve()
+    try:
+        return str(resolved.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(resolved)
+
+
+def resolve_portable_path(path: str | Path) -> Path:
+    """Inverse of to_portable_path: anchor relative paths to the repo root.
+
+    Absolute paths (e.g. files outside the repo) are returned unchanged.
+    """
+    path = Path(path)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
 
 class BfsCache:
     """Cache for BFS distance tables, mapping goal coordinates to their BFS tables."""
@@ -83,7 +109,7 @@ class Deadline:
 
 def get_grid(map_file: str | Path) -> Grid:
     width, height = 0, 0
-    with open(map_file, "r") as f:
+    with open(resolve_portable_path(map_file), "r") as f:
         # retrieve map size
         for row in f:
             # get width
@@ -116,7 +142,7 @@ def get_grid(map_file: str | Path) -> Grid:
 
 
 def get_scenario(scen_file: str | Path, N: int | None = None) -> tuple[Config, Config]:
-    with open(scen_file, "r") as f:
+    with open(resolve_portable_path(scen_file), "r") as f:
         starts, goals = Config(), Config()
         for row in f:
             res = re.match(

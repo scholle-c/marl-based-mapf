@@ -446,13 +446,42 @@ def _path_mask(grid: Grid, path: list[tuple[int, int]]) -> np.ndarray:
     return mask
 
 
+def _path_time_mask(grid: Grid, path: list[tuple[int, int]]) -> np.ndarray:
+    """Continuous channel: normalized timestep (0=start, 1=goal) at each path
+    cell, 0.0 elsewhere. Only meaningful together with the binary path mask
+    (0.0 is ambiguous between "not visited" and "visited at the start")."""
+    mask = np.zeros(grid.shape, dtype=np.float32)
+    n = len(path)
+    if n <= 1:
+        return mask
+    for t, coord in enumerate(path):
+        mask[coord] = t / (n - 1)
+    return mask
+
+
+def _aggregate_path_times(grid: Grid, paths: list[list[tuple[int, int]]]) -> np.ndarray:
+    """other_paths_time: minimum normalized timestep among all `paths` that
+    actually visit each cell (0.0 where none do). Only agents visiting a
+    given cell contribute to the min there — an agent's absence never counts
+    as "visits at time 0"."""
+    result = np.full(grid.shape, np.inf, dtype=np.float32)
+    for path in paths:
+        if not path:
+            continue
+        visited = _path_mask(grid, path) > 0
+        tmask = _path_time_mask(grid, path)
+        result = np.where(visited, np.minimum(result, tmask), result)
+    return np.where(np.isinf(result), 0.0, result).astype(np.float32)
+
+
 class PathMembershipAgentsChannelExtractor(FeatureExtractor):
     """Encodes each agent's individual, unconstrained shortest path (start ->
     goal, greedy BFS-descent, ignoring other agents) as an explicit binary
     grid channel, instead of collapsing it into BFS-distance sum/min scalars
     like RichAgentsChannelExtractor/CollisionAwareAgentsChannelExtractor.
 
-    Channels: map, goal, start, own_path_mask, other_paths_mask [, y_rel, x_rel]
+    Base channels: map, goal, start, own_path_mask, other_paths_mask
+    [, intersection_mask] [, own_path_time, other_paths_time] [, y_rel, x_rel]
 
     other_paths_mask is the union (binary OR) of other agents' path masks.
     `agents_filter` controls which other agents contribute to that union:
@@ -463,6 +492,16 @@ class PathMembershipAgentsChannelExtractor(FeatureExtractor):
                     own path (same conflict test as
                     CollisionAwareAgentsChannelExtractor).
 
+    `include_intersection`: adds an explicit own_path_mask & other_paths_mask
+    channel — the exact potential-conflict cells — instead of leaving the
+    model to infer the intersection from two separate masks.
+
+    `encode_time`: adds own_path_time / other_paths_time channels (normalized
+    timestep along each path, min-aggregated for other_paths_time) alongside
+    the existing binary masks, so the model can distinguish cells visited at
+    similar times (real conflict risk) from cells that merely overlap in
+    space but at very different times.
+
     Falls back to an all-zero own_path_mask when `own_start`/`bfs_tables`
     aren't available (needed to reconstruct paths).
     """
@@ -470,16 +509,27 @@ class PathMembershipAgentsChannelExtractor(FeatureExtractor):
     def __init__(
         self,
         agents_filter: str = "all",
+        include_intersection: bool = False,
+        encode_time: bool = False,
         use_coord_channels: bool = True,
     ):
         if agents_filter not in ("all", "colliding"):
             raise ValueError(f"Unknown agents_filter: {agents_filter!r}")
         self._agents_filter = agents_filter
+        self._include_intersection = include_intersection
+        self._encode_time = encode_time
         self._use_coord_channels = use_coord_channels
 
     @property
     def n_channels(self) -> int:
-        return 7 if self._use_coord_channels else 5
+        n = 5  # map, goal, start, own_path_mask, other_paths_mask
+        if self._include_intersection:
+            n += 1
+        if self._encode_time:
+            n += 2
+        if self._use_coord_channels:
+            n += 2
+        return n
 
     def extract(
         self,
@@ -499,6 +549,7 @@ class PathMembershipAgentsChannelExtractor(FeatureExtractor):
         start_ch[start] = 1.0
         other_starts = other_starts or []
 
+        own_path: list[tuple[int, int]] = []
         own_path_ch = np.zeros_like(map_ch)
         if own_start is not None and bfs_tables and goal in bfs_tables:
             own_path = _greedy_bfs_path(grid, own_start, goal, bfs_tables[goal])
@@ -510,6 +561,7 @@ class PathMembershipAgentsChannelExtractor(FeatureExtractor):
                 grid, goal, own_start, other_agents, other_starts, bfs_tables
             )
 
+        other_paths: list[list[tuple[int, int]]] = []
         other_paths_ch = np.zeros_like(map_ch)
         if bfs_tables:
             for other_goal, other_start in zip(relevant_goals, relevant_starts):
@@ -518,13 +570,26 @@ class PathMembershipAgentsChannelExtractor(FeatureExtractor):
                 other_path = _greedy_bfs_path(
                     grid, other_start, other_goal, bfs_tables[other_goal]
                 )
+                other_paths.append(other_path)
                 other_paths_ch = np.maximum(
                     other_paths_ch, _path_mask(grid, other_path)
                 )
 
-        tensor = torch.from_numpy(
-            np.stack([map_ch, goal_ch, start_ch, own_path_ch, other_paths_ch])
-        ).unsqueeze(0)
+        channels = [map_ch, goal_ch, start_ch, own_path_ch, other_paths_ch]
+
+        if self._include_intersection:
+            intersection_ch = ((own_path_ch > 0) & (other_paths_ch > 0)).astype(
+                np.float32
+            )
+            channels.append(intersection_ch)
+
+        if self._encode_time:
+            own_path_time_ch = _path_time_mask(grid, own_path)
+            other_paths_time_ch = _aggregate_path_times(grid, other_paths)
+            channels.append(own_path_time_ch)
+            channels.append(other_paths_time_ch)
+
+        tensor = torch.from_numpy(np.stack(channels)).unsqueeze(0)
         if device is not None:
             tensor = tensor.to(device)
         if self._use_coord_channels:

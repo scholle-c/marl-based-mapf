@@ -182,6 +182,9 @@ def main():
             consts.EXTRACTOR_COLLISION_AWARE,
             consts.EXTRACTOR_PATH_ALL_AGENTS,
             consts.EXTRACTOR_PATH_COLLIDING_AGENTS,
+            consts.EXTRACTOR_PATH_ALL_AGENTS_INTERSECTION,
+            consts.EXTRACTOR_PATH_ALL_AGENTS_TIME,
+            consts.EXTRACTOR_PATH_ALL_AGENTS_INTERSECTION_TIME,
         ],
     )
     parser.add_argument(
@@ -195,6 +198,41 @@ def main():
         type=int,
         default=4,
         help="Number of conv blocks in DistanceTableCNN (default: 4).",
+    )
+    parser.add_argument(
+        "--model-arch",
+        type=str,
+        default="cnn",
+        choices=["cnn", "vit"],
+        help=(
+            "'cnn': DistanceTableCNN (default). "
+            "'vit': from-scratch PatchTransformer (not a pretrained torchvision "
+            "ViT — see --vit-* flags), needs --map-file for grid dimensions."
+        ),
+    )
+    parser.add_argument(
+        "--vit-patch-size",
+        type=int,
+        default=1,
+        help="PatchTransformer patch size in cells (default: 1 = one token per cell).",
+    )
+    parser.add_argument(
+        "--vit-embed-dim",
+        type=int,
+        default=64,
+        help="PatchTransformer token embedding dimension (default: 64).",
+    )
+    parser.add_argument(
+        "--vit-layers",
+        type=int,
+        default=4,
+        help="PatchTransformer number of encoder layers (default: 4).",
+    )
+    parser.add_argument(
+        "--vit-heads",
+        type=int,
+        default=4,
+        help="PatchTransformer number of attention heads (default: 4).",
     )
     parser.add_argument(
         "--model-file",

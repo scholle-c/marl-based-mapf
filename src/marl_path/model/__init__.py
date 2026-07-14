@@ -1,6 +1,6 @@
 """Package containing the pathfinding model definition and modules for training, inference and evaluation of the model."""
 
-from .definition import DistanceTableCNN, DefaultModel
+from .definition import DistanceTableCNN, PatchTransformer, DefaultModel
 from .training import (
     pretrain_on_default_value,
     pretrain_on_bfs,
@@ -29,6 +29,7 @@ from .feature_extraction import (
 __all__ = [
     "DefaultModel",
     "DistanceTableCNN",
+    "PatchTransformer",
     "load_model",
     "save_checkpoint",
     "build_input_tensor",

@@ -11,6 +11,7 @@ import marl_path.constants as consts
 from marl_path.model import (
     DefaultModel,
     DistanceTableCNN,
+    PatchTransformer,
     load_model,
     pretrain_on_default_value,
     pretrain_on_bfs,
@@ -72,6 +73,11 @@ class DefaultTrainingPipeline(DefaultPipeline):
             extractor_type=self.args.feature_extractor_type,
             hidden_channels=getattr(self.args, "hidden_channels", 32),
             depth=getattr(self.args, "depth", 4),
+            model_arch=getattr(self.args, "model_arch", "cnn"),
+            vit_patch_size=getattr(self.args, "vit_patch_size", 1),
+            vit_embed_dim=getattr(self.args, "vit_embed_dim", 64),
+            vit_layers=getattr(self.args, "vit_layers", 4),
+            vit_heads=getattr(self.args, "vit_heads", 4),
         )
         self.training_stats = TrainingStats(
             training_mode=self.args.pipeline_mode,
@@ -123,6 +129,11 @@ def _initialize_model(
     extractor_type: str = consts.EXTRACTOR_BASIC,
     hidden_channels: int = 32,
     depth: int = 4,
+    model_arch: str = "cnn",
+    vit_patch_size: int = 1,
+    vit_embed_dim: int = 64,
+    vit_layers: int = 4,
+    vit_heads: int = 4,
 ) -> tuple[DefaultModel, FeatureExtractor]:
     if path is not None:
         return load_model(path, device=device)
@@ -145,14 +156,42 @@ def _initialize_model(
         extractor = PathMembershipAgentsChannelExtractor(agents_filter="all")
     elif extractor_type == consts.EXTRACTOR_PATH_COLLIDING_AGENTS:
         extractor = PathMembershipAgentsChannelExtractor(agents_filter="colliding")
+    elif extractor_type == consts.EXTRACTOR_PATH_ALL_AGENTS_INTERSECTION:
+        extractor = PathMembershipAgentsChannelExtractor(
+            agents_filter="all", include_intersection=True
+        )
+    elif extractor_type == consts.EXTRACTOR_PATH_ALL_AGENTS_TIME:
+        extractor = PathMembershipAgentsChannelExtractor(
+            agents_filter="all", encode_time=True
+        )
+    elif extractor_type == consts.EXTRACTOR_PATH_ALL_AGENTS_INTERSECTION_TIME:
+        extractor = PathMembershipAgentsChannelExtractor(
+            agents_filter="all", include_intersection=True, encode_time=True
+        )
     else:
         extractor = BasicExtractor()
 
-    model = DistanceTableCNN(
-        in_channels=extractor.n_channels,
-        hidden_channels=hidden_channels,
-        depth=depth,
-    ).to(device)
+    if model_arch == "vit":
+        if grid is None:
+            raise ValueError(
+                "--model-arch vit requires --map-file (grid dimensions needed "
+                "for the positional embedding)."
+            )
+        model = PatchTransformer(
+            in_channels=extractor.n_channels,
+            grid_height=grid.shape[0],
+            grid_width=grid.shape[1],
+            patch_size=vit_patch_size,
+            embed_dim=vit_embed_dim,
+            num_layers=vit_layers,
+            num_heads=vit_heads,
+        ).to(device)
+    else:
+        model = DistanceTableCNN(
+            in_channels=extractor.n_channels,
+            hidden_channels=hidden_channels,
+            depth=depth,
+        ).to(device)
     if model_initialization_mode == 1:
         logger.info("applying pretraining on default values...")
         pretrain_optimizer = torch.optim.Adam(model.parameters(), lr=0.001)

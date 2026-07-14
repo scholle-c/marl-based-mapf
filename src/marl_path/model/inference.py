@@ -5,7 +5,7 @@ to load a model and run a forward pass.
 
 from __future__ import annotations
 
-from .definition import DefaultModel, DistanceTableCNN
+from .definition import DefaultModel, DistanceTableCNN, PatchTransformer
 from .feature_extraction import (
     FeatureExtractor,
     BasicExtractor,
@@ -24,8 +24,24 @@ def save_checkpoint(
     model: DefaultModel, extractor: FeatureExtractor, path: str
 ) -> None:
     """Save model weights, extractor config, and model architecture together."""
-    hidden_channels = getattr(model, "_hidden_channels", None)
-    depth = getattr(model, "_depth", None)
+    if isinstance(model, PatchTransformer):
+        model_config = {
+            "arch": "vit",
+            "in_channels": extractor.n_channels,
+            "grid_height": model._grid_height,
+            "grid_width": model._grid_width,
+            "vit_patch_size": model._patch_size,
+            "vit_embed_dim": model._embed_dim,
+            "vit_layers": model._num_layers,
+            "vit_heads": model._num_heads,
+        }
+    else:
+        model_config = {
+            "arch": "cnn",
+            "in_channels": extractor.n_channels,
+            "hidden_channels": getattr(model, "_hidden_channels", None),
+            "depth": getattr(model, "_depth", None),
+        }
     torch.save(
         {
             "state_dict": model.state_dict(),
@@ -33,12 +49,12 @@ def save_checkpoint(
                 "class": type(extractor).__name__,
                 "use_coord_channels": getattr(extractor, "_use_coord_channels", True),
                 "agents_filter": getattr(extractor, "_agents_filter", None),
+                "include_intersection": getattr(
+                    extractor, "_include_intersection", None
+                ),
+                "encode_time": getattr(extractor, "_encode_time", None),
             },
-            "model_config": {
-                "in_channels": extractor.n_channels,
-                "hidden_channels": hidden_channels,
-                "depth": depth,
-            },
+            "model_config": model_config,
         },
         path,
     )
@@ -56,18 +72,31 @@ def load_model(
         extractor = _extractor_from_config(checkpoint.get("extractor"))
         model_config = checkpoint.get("model_config", {})
         in_channels = model_config.get("in_channels", extractor.n_channels)
-        hidden_channels = model_config.get("hidden_channels") or 32
-        depth = model_config.get("depth") or 4
+        arch = model_config.get("arch", "cnn")
     else:
         # Legacy format: bare state_dict saved with torch.save(model.state_dict(), path)
         state_dict = checkpoint
         extractor = BasicExtractor()
         in_channels = 5
-        hidden_channels = 32
-        depth = 4
-    model = DistanceTableCNN(
-        in_channels=in_channels, hidden_channels=hidden_channels, depth=depth
-    ).to(device)
+        model_config = {}
+        arch = "cnn"
+
+    if arch == "vit":
+        model = PatchTransformer(
+            in_channels=in_channels,
+            grid_height=model_config.get("grid_height", 32),
+            grid_width=model_config.get("grid_width", 32),
+            patch_size=model_config.get("vit_patch_size") or 1,
+            embed_dim=model_config.get("vit_embed_dim") or 64,
+            num_layers=model_config.get("vit_layers") or 4,
+            num_heads=model_config.get("vit_heads") or 4,
+        ).to(device)
+    else:
+        model = DistanceTableCNN(
+            in_channels=in_channels,
+            hidden_channels=model_config.get("hidden_channels") or 32,
+            depth=model_config.get("depth") or 4,
+        ).to(device)
     model.load_state_dict(state_dict)
     model.eval()
     return model, extractor
@@ -130,6 +159,9 @@ def _extractor_from_config(config: dict | None) -> FeatureExtractor:
     if cls_name == "PathMembershipAgentsChannelExtractor":
         agents_filter = config.get("agents_filter") or "all"
         return PathMembershipAgentsChannelExtractor(
-            agents_filter=agents_filter, use_coord_channels=use_coord
+            agents_filter=agents_filter,
+            include_intersection=bool(config.get("include_intersection")),
+            encode_time=bool(config.get("encode_time")),
+            use_coord_channels=use_coord,
         )
     return BasicExtractor(use_coord_channels=use_coord)

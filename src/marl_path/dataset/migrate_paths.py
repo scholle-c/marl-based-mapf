@@ -42,7 +42,9 @@ def migrate(dataset_dir: Path, dry_run: bool = False) -> None:
             instance.scen_file = new_scen_file
             instance.save(file)
 
-    logger.info(f"{'Would change' if dry_run else 'Changed'} {changed}/{len(files)} files")
+    logger.info(
+        f"{'Would change' if dry_run else 'Changed'} {changed}/{len(files)} files"
+    )
 
 
 def main() -> None:

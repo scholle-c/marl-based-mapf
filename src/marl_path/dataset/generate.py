@@ -3,7 +3,7 @@
 Usage:
     marl-generate \\
         --map-file assets/random-32-32-20.map \\
-        --scen-dir assets/random-32-32-20_map-scen-random/scen-random \\
+        --scen-dir assets/scen-random/random32-20 \\
         --output-dir data/random-32-32-20 \\
         --num-agents 30 --subsets-per-scen 10 --timeout 60 --suboptimality 1.2
 """

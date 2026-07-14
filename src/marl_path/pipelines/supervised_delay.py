@@ -253,4 +253,5 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             seed=eval_seed,
             penalty_scale=penalty_scale,
         )
+        assert eval_summary.model is not None  # model= was passed, so always set
         return eval_summary.model.mean, eval_summary

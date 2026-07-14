@@ -48,9 +48,9 @@ def main():
         help=(
             f"'{consts.PIPELINE_MODE_SUPERVISED_DELAY}': train model on CBS-optimal dataset. "
             f"'{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM baseline only. "
-            f"'{consts.PIPELINE_MODE_EVAL_ONLY}': evaluate a trained --model-file "
-            "(LaCAM with model vs. vanilla baseline vs. CBS-optimal) on --dataset-dir/test, "
-            "capped by --eval-limit."
+            f"'{consts.PIPELINE_MODE_EVAL_ONLY}': evaluate vanilla LaCAM baseline vs. "
+            "CBS-optimal on --dataset-dir/test, capped by --eval-limit. "
+            "Pass --model-file to also compare a trained model against the baseline."
         ),
     )
 
@@ -279,8 +279,6 @@ def main():
     elif args.pipeline_mode == consts.PIPELINE_MODE_EVAL_ONLY:
         if args.dataset_dir is None:
             parser.error("--dataset-dir is required for eval_only mode.")
-        if args.model_file is None:
-            parser.error("--model-file is required for eval_only mode.")
 
     run_pipeline(args)
 

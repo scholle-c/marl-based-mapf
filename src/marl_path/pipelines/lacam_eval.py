@@ -33,11 +33,16 @@ class LacamEvalSummary:
 
 @dataclass
 class LacamComparisonSummary:
-    """Comparison between baseline, model, and CBS-optimal SOCs."""
+    """Comparison between baseline, model, and CBS-optimal SOCs.
+
+    `model`/`win_rate`/`gap_closed` are None when no model was evaluated
+    (e.g. eval_only run without --model-file) — only the baseline-vs-CBS
+    optimality gap is meaningful in that case.
+    """
 
     baseline: LacamEvalSummary
-    model: LacamEvalSummary
-    win_rate: float  # fraction of runs where model SOC < baseline SOC
+    model: LacamEvalSummary | None
+    win_rate: float | None  # fraction of runs where model SOC < baseline SOC
     gap_closed: (
         float | None
     )  # (baseline_mean - model_mean) / (baseline_mean - cbs_mean)
@@ -65,10 +70,20 @@ def track_b_log_suffix(eval_summary: LacamComparisonSummary) -> str:
         if eval_summary.gap_closed is not None
         else ""
     )
+    model_text = (
+        f"soc_model={m.mean:.1f}±{m.std:.1f} [min={m.min:.0f} max={m.max:.0f}]  "
+        if m is not None
+        else ""
+    )
+    win_text = (
+        f"win_rate={100.0 * eval_summary.win_rate:.1f}%"
+        if eval_summary.win_rate is not None
+        else ""
+    )
     return (
-        f"  soc_model={m.mean:.1f}±{m.std:.1f} [min={m.min:.0f} max={m.max:.0f}]  "
+        f"  {model_text}"
         f"soc_baseline={b.mean:.1f}±{b.std:.1f} [min={b.min:.0f} max={b.max:.0f}]  "
-        f"win_rate={100.0 * eval_summary.win_rate:.1f}%{cbs_text}{gap_text}"
+        f"{win_text}{cbs_text}{gap_text}"
     )
 
 
@@ -93,10 +108,14 @@ def eval_test_instances(
     penalty_scale: float = 1.0,
     limit: int | None = None,
 ) -> LacamComparisonSummary:
-    """Evaluate LaCAM (baseline vs model) on cached test instances.
+    """Evaluate LaCAM (baseline, optionally vs model) on cached test instances.
 
     Each test instance is run once with the given seed. CBS-optimal SOC is
     read directly from the cached paths — no CBS re-execution needed.
+
+    `model`: if None, only the vanilla-LaCAM baseline is run against
+    CBS-optimal (no second, redundant LaCAM run) — useful to gauge the
+    LaCAM/CBS optimality gap on a dataset before any model exists.
 
     `limit`: if set, only the first `limit` instances (sorted by filename)
     are evaluated instead of the full test set — useful for a quick check
@@ -126,37 +145,50 @@ def eval_test_instances(
         b_soc = _run_lacam_once(
             grid, starts, goals, seed, time_limit_ms=time_limit_ms, flg_star=flg_star
         )
-        m_soc = _run_lacam_once(
-            grid,
-            starts,
-            goals,
-            seed,
-            model=model,
-            device=device,
-            extractor=extractor,
-            time_limit_ms=time_limit_ms,
-            flg_star=flg_star,
-            penalty_scale=penalty_scale,
+        m_soc = (
+            _run_lacam_once(
+                grid,
+                starts,
+                goals,
+                seed,
+                model=model,
+                device=device,
+                extractor=extractor,
+                time_limit_ms=time_limit_ms,
+                flg_star=flg_star,
+                penalty_scale=penalty_scale,
+            )
+            if model is not None
+            else None
         )
 
         if b_soc is not None:
             baseline_socs.append(b_soc)
-        if m_soc is not None:
+        if model is not None and m_soc is not None:
             model_socs.append(m_soc)
 
         logger.info(
             "Test instance {}: soc_baseline={}  soc_model={}  soc_cbs={}",
             npz_path.name,
             b_soc if b_soc is not None else "FAIL",
-            m_soc if m_soc is not None else "FAIL",
+            (m_soc if m_soc is not None else "FAIL") if model is not None else "N/A",
             cbs_soc,
         )
 
     baseline_summary = _summarize_socs(baseline_socs, n_instances)
-    model_summary = _summarize_socs(model_socs, n_instances)
-
     cbs_mean: float | None = float(np.mean(cbs_socs)) if cbs_socs else None
 
+    if model is None:
+        return LacamComparisonSummary(
+            baseline=baseline_summary,
+            model=None,
+            win_rate=None,
+            gap_closed=None,
+            cbs_mean=cbs_mean,
+            cbs_socs=cbs_socs,
+        )
+
+    model_summary = _summarize_socs(model_socs, n_instances)
     return LacamComparisonSummary(
         baseline=baseline_summary,
         model=model_summary,

@@ -1,11 +1,11 @@
 # LaCAM / eval settings (Track B)
 map_file        = "./assets/random-32-32-20.map"
-scen_file       = "./assets/random-32-32-20_map-scen-random/scen-random/random-32-32-20-random-1.scen"
+scen_file       = "./assets/scen-random/random32-20/random-32-32-20-random-1.scen"
 num_agents      = 10
 verbose         = 0
 seed            = 1
-time_limit_ms   = 5000
-flg_star        = true
+time_limit_ms   = 10000
+flg_star        = false
 
 # Pipeline
 pipeline_mode   = "supervised_delay"

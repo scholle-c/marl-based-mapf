@@ -44,10 +44,27 @@ class DefaultPipeline(ABC):
         if map_file is None or scen_file is None:
             self.grid = self.starts = self.goals = None
             return
-        self.grid = get_grid(self.args.map_file)
-        self.starts, self.goals = get_scenario(
-            self.args.scen_file, self.args.num_agents
-        )
+        try:
+            self.grid = get_grid(self.args.map_file)
+            self.starts, self.goals = get_scenario(
+                self.args.scen_file, self.args.num_agents
+            )
+        except OSError:
+            if self.args.pipeline_mode == consts.PIPELINE_MODE_LACAM_ONLY:
+                raise
+            # map_file/scen_file are only required for lacam_only (used by
+            # ComparisonPipeline); other modes load their MAPF instances
+            # per-test-case from --dataset-dir, so a stale/unset default
+            # here (e.g. from default_config.toml) shouldn't be fatal.
+            logger.warning(
+                "Could not load --map-file/--scen-file ({}, {}); continuing "
+                "without a MAPF instance since pipeline mode '{}' doesn't "
+                "require one.",
+                map_file,
+                scen_file,
+                self.args.pipeline_mode,
+            )
+            self.grid = self.starts = self.goals = None
 
     @abstractmethod
     def run_model_training(self) -> None:

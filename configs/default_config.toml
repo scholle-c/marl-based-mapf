@@ -22,9 +22,10 @@ device          = "auto"
 seed_training   = 1
 feature_extractor_type = "aggregated_agents_channel"
 model_initialization_mode = 0
+checkpoint_intervall = 2
 
 # Track B eval frequency
-eval_interval   = 2
+eval_interval   = 1000
 eval_seeds      = 3
 
 # Output

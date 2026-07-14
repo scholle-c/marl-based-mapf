@@ -189,6 +189,8 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
                     lr_after,
                 )
 
+            self.maybe_save_checkpoint(epoch)
+
     # ------------------------------------------------------------------ #
     # Shared helpers                                                        #
     # ------------------------------------------------------------------ #

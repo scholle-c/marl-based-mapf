@@ -19,6 +19,7 @@ DEFAULT_FILENAME_GOAL_COVERAGE: str = "goal_coverage.csv"
 
 # Folder Names
 FOLDER_COMPARISON_ALGOS: str = "other_algos"
+FOLDER_CHECKPOINTS: str = "checkpoints"
 EXPERT_ALGO_NAME: str = "expert_algo"
 
 COMPARISON_ALGO_NONE: str = "none"

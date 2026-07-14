@@ -110,6 +110,23 @@ class DefaultTrainingPipeline(DefaultPipeline):
             self.optimizer, mode="min", factor=0.5, patience=10, min_lr=1e-6
         )
 
+    def maybe_save_checkpoint(self, epoch: int) -> None:
+        """Save a mid-training checkpoint every --checkpoint-interval epochs (if set)."""
+        checkpoint_interval = getattr(self.args, "checkpoint_interval", 0)
+        if (
+            self.args.record_mode == 0
+            or not checkpoint_interval
+            or (epoch + 1) % checkpoint_interval != 0
+        ):
+            return
+        checkpoint_dir = os.path.join(self.args.output_dir, consts.FOLDER_CHECKPOINTS)
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        checkpoint_path = os.path.join(
+            checkpoint_dir, f"checkpoint_epoch_{epoch + 1}.pt"
+        )
+        save_checkpoint(self.model, self.extractor, checkpoint_path)
+        logger.info("Saved checkpoint to {}", checkpoint_path)
+
     def store_results(self) -> None:
         if self.args.record_mode != 0:
             os.makedirs(self.args.output_dir, exist_ok=True)

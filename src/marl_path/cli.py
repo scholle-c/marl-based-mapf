@@ -168,6 +168,16 @@ def main():
             "(default: all instances in --dataset-dir/test)."
         ),
     )
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=0,
+        help=(
+            "supervised_delay mode: save a model checkpoint to "
+            "--output-dir/checkpoints/ every N epochs, in addition to the "
+            "final trained_model.pt (default: 0 = disabled)."
+        ),
+    )
 
     # ── Model initialisation ────────────────────────────────────────────────
     parser.add_argument(

@@ -15,6 +15,7 @@ from .feature_extraction import (
     CollisionAwareAgentsChannelExtractor,
     PathMembershipAgentsChannelExtractor,
 )
+from marl_path.shared.mapf_utils import BfsCache
 import torch
 import numpy as np
 from typing import Any
@@ -109,6 +110,8 @@ def predict_distance_table(
     goal: tuple[int, int],
     extractor: FeatureExtractor | None = None,
     other_agents: list[tuple[int, int]] | None = None,
+    other_starts: list[tuple[int, int]] | None = None,
+    bfs_cache: BfsCache | None = None,
 ) -> Any:
     """
     Predict a distance/value table for the provided map, start, and goal.
@@ -116,27 +119,55 @@ def predict_distance_table(
     Parameters
     ----------
     start:
-        Start coordinate as (y, x) in grid coordinates.
+        This agent's start coordinate as (y, x) in grid coordinates.
     goal:
-        Goal coordinate as (y, x) in grid coordinates.
+        This agent's goal coordinate as (y, x) in grid coordinates.
     grid:
         2D map array where non-zero entries denote traversable cells.
     extractor:
         Feature extractor to use. Defaults to BasicExtractor.
     other_agents:
-        Positions of other agents to encode. Defaults to empty list.
+        Other agents' GOAL positions. Defaults to empty list.
+    other_starts:
+        Other agents' START positions, index-aligned with `other_agents`.
+        Needed (together with `bfs_cache`) by extractors that reconstruct
+        individual agent paths, e.g. PathMembershipAgentsChannelExtractor —
+        without it those extractors silently fall back to all-zero path
+        channels, which is out-of-distribution for a model trained via
+        CbsDataset (which always supplies these). Defaults to empty list.
+    bfs_cache:
+        Reuse an existing BfsCache for this grid instead of building a fresh
+        one (BFS itself is cheap, but this avoids redundant recomputation
+        across repeated calls on the same map).
     """
     if extractor is None:
         extractor = BasicExtractor()
     if other_agents is None:
         other_agents = []
+    if other_starts is None:
+        other_starts = []
 
     grid_np = np.asarray(grid)
     if grid_np.ndim != 2:
         raise ValueError("Grid must be a 2D array.")
 
+    if bfs_cache is None:
+        bfs_cache = BfsCache(grid_np)
+    bfs_tables = {g: bfs_cache[g] for g in other_agents}
+    bfs_tables.update({s: bfs_cache[s] for s in other_starts})
+    bfs_tables[goal] = bfs_cache[goal]
+
     device = next(model.parameters()).device
-    input_tensor = extractor.extract(grid_np, goal, start, other_agents, device=device)
+    input_tensor = extractor.extract(
+        grid_np,
+        goal,
+        start,
+        other_agents,
+        device=device,
+        bfs_tables=bfs_tables,
+        other_starts=other_starts,
+        own_start=start,
+    )
 
     with torch.no_grad():
         prediction = model(input_tensor).squeeze().cpu().numpy()

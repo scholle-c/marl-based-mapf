@@ -3,12 +3,12 @@
 from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Sequence
+from typing import Any, Iterable, List, Optional, Sequence
 import torch
 import numpy as np
 
 from marl_path.shared import Coord, get_neighbors
-from marl_path.shared.mapf_utils import BfsCache
+from marl_path.shared.mapf_utils import BfsCache, greedy_bfs_path
 from marl_path.delay_methods import DelayMethod, NonOptimalPenaltyDelay
 from .feature_extraction import FeatureExtractor, BasicExtractor
 
@@ -24,6 +24,30 @@ class DenseDelayBatchItem:
     input_tensors: List[torch.Tensor]
     targets: torch.Tensor  # (num_agents, H, W)
     free_mask: torch.Tensor  # (H, W) bool — True where the grid is traversable
+    base_on_path: Optional[torch.Tensor] = None
+    # (num_agents, H, W), 0 on each agent's own greedy path / 1 elsewhere.
+    # Only set for delta-target delay methods (see DelayMethod.is_delta_target)
+    # — `targets` there holds a *correction* label, not the on/off-path label
+    # directly, and this is needed to reconstruct the latter for metrics.
+
+
+def _compute_base_on_path(
+    grid: np.ndarray,
+    bfs_cache: BfsCache,
+    paths: List[List[Coord]],
+    goals: List[Coord],
+) -> np.ndarray:
+    """Per-agent greedy-path mask: 0 on the agent's own unconstrained
+    greedy-BFS path, 1 elsewhere. Same convention as NonOptimalPenaltyDelay."""
+    out = np.ones((len(paths), *grid.shape), dtype=np.float32)
+    for i, path in enumerate(paths):
+        if not path:
+            continue
+        bfs_table = bfs_cache[goals[i]]
+        greedy_path = greedy_bfs_path(grid, path[0], goals[i], bfs_table)
+        for coord in greedy_path:
+            out[i][coord] = 0.0
+    return out
 
 
 def prepare_dense_delay_batch_item(
@@ -39,7 +63,9 @@ def prepare_dense_delay_batch_item(
 
     delay_method defaults to NonOptimalPenaltyDelay: 0 on the agent's CBS-optimal
     path, 1 everywhere else. Any DelayMethod that returns a full grid.shape array
-    works here.
+    works here. For delta-target methods (delay_method.is_delta_target), the
+    per-agent greedy-path mask is also attached (base_on_path) so metrics can
+    reconstruct the true on/off-path label from the correction target.
     """
     method = delay_method or NonOptimalPenaltyDelay()
     dense = np.stack(
@@ -50,7 +76,14 @@ def prepare_dense_delay_batch_item(
     ).astype(np.float32)
     targets = torch.from_numpy(dense).to(device)
     free_mask = torch.from_numpy(grid.astype(bool)).to(device)
-    return DenseDelayBatchItem(input_tensors, targets, free_mask)
+
+    base_on_path = None
+    if getattr(method, "is_delta_target", False):
+        base_on_path = torch.from_numpy(
+            _compute_base_on_path(grid, bfs_cache, paths, goals)
+        ).to(device)
+
+    return DenseDelayBatchItem(input_tensors, targets, free_mask, base_on_path)
 
 
 def _batch_delay_logits(model: Any, input_tensors: List[torch.Tensor]) -> torch.Tensor:
@@ -139,6 +172,19 @@ def trivial_baseline_dense_loss(
     return total_loss / n if n else float("nan")
 
 
+def _reconstruct_on_path_value(
+    base_on_path: Optional[torch.Tensor], value: torch.Tensor
+) -> torch.Tensor:
+    """XOR-recombine a delta-target prediction/target with its greedy-path
+    base to get the actual on/off-path value. No-op (returns `value`
+    unchanged) when `base_on_path` is None, i.e. for non-delta delay methods
+    — `value` already *is* the on/off-path value there.
+    """
+    if base_on_path is None:
+        return value
+    return base_on_path + value - 2.0 * base_on_path * value
+
+
 def compute_mask_iou_f1(
     model: Any,
     batch: Iterable[DenseDelayBatchItem],
@@ -150,6 +196,13 @@ def compute_mask_iou_f1(
 
     This is the class-imbalance-robust metric: a model that always predicts
     "off-path" gets BCE that looks deceptively good but IoU/F1 == 0 here.
+
+    For delta-target delay methods, `targets` holds a correction label rather
+    than the on/off-path label directly — both the prediction and the target
+    are first XOR-recombined with `item.base_on_path` so this metric stays
+    comparable across delay methods (always "how well does the model
+    identify the true CBS-path cells", never "how well does it predict the
+    correction").
     """
     model.eval()
     ious: list[float] = []
@@ -157,8 +210,13 @@ def compute_mask_iou_f1(
     with torch.no_grad():
         for item in batch:
             logits = _batch_delay_logits(model, item.input_tensors)
-            pred_on_path = torch.sigmoid(logits) < threshold
-            true_on_path = item.targets < 0.5
+            probs = torch.sigmoid(logits)
+            pred_on_path = (
+                _reconstruct_on_path_value(item.base_on_path, probs) < threshold
+            )
+            true_on_path = (
+                _reconstruct_on_path_value(item.base_on_path, item.targets) < 0.5
+            )
             mask = item.free_mask.unsqueeze(0).expand_as(pred_on_path)
             for agent_idx in range(pred_on_path.shape[0]):
                 p = pred_on_path[agent_idx][mask[agent_idx]]
@@ -189,7 +247,8 @@ def compute_cell_overlap(
     def _visited_cells(batch: Iterable[DenseDelayBatchItem]) -> set[tuple[int, int]]:
         visited: set[tuple[int, int]] = set()
         for item in batch:
-            on_path = (item.targets < 0.5).cpu().numpy()
+            true_value = _reconstruct_on_path_value(item.base_on_path, item.targets)
+            on_path = (true_value < 0.5).cpu().numpy()
             for agent_mask in on_path:
                 ys, xs = np.nonzero(agent_mask)
                 visited.update(zip(ys.tolist(), xs.tolist()))

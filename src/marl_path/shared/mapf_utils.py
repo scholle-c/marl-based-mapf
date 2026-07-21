@@ -192,6 +192,33 @@ def get_neighbors(grid: Grid, coord: Coord) -> list[Coord]:
     return neigh
 
 
+def greedy_bfs_path(
+    grid: Grid, start: Coord, goal: Coord, bfs_table: np.ndarray
+) -> list[Coord]:
+    """Reconstruct the greedy BFS-descent path from `start` to `goal`: at each
+    step, move to the neighbor with the smallest distance-to-goal.
+
+    `bfs_table` must be anchored at `goal` (e.g. from BfsCache[goal]). This is
+    the agent's individual shortest path, ignoring all other agents — used as
+    the "naive"/unconstrained baseline that CBS-optimal paths are compared
+    against (see NonAStarPenaltyDelay, NonOptimalPenaltyDeltaDelay,
+    PathMembershipAgentsChannelExtractor).
+
+    Guards against non-terminating loops on a disconnected/corrupt table with
+    a step cap — should never trigger on a connected grid.
+    """
+    current = start
+    path = [current]
+    max_steps = grid.size + 1
+    while current != goal and len(path) <= max_steps:
+        neighbors = get_neighbors(grid, current)
+        if not neighbors:
+            break
+        current = min(neighbors, key=lambda n: bfs_table[n])
+        path.append(current)
+    return path
+
+
 def save_configs_for_visualizer(configs: Configs, filename: str | Path) -> None:
     output_dirname = Path(filename).parent
     if not output_dirname.exists():

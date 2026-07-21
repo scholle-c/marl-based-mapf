@@ -96,6 +96,19 @@ class DefaultTrainingPipeline(DefaultPipeline):
             vit_layers=getattr(self.args, "vit_layers", 4),
             vit_heads=getattr(self.args, "vit_heads", 4),
         )
+        if getattr(self.model, "_delay_target", None) is None:
+            # Only tag freshly-constructed models from --delay-method; a
+            # loaded checkpoint (--model-file) already carries its own tag
+            # from training time, which must NOT be overwritten by whatever
+            # --delay-method happens to be set on this invocation (e.g. the
+            # CLI default when just running eval_only).
+            # nn.Module.__setattr__ is typed as Tensor | Module only — bypass
+            # it for this plain metadata attribute (see also inference.py).
+            object.__setattr__(
+                self.model,
+                "_delay_target",
+                getattr(self.args, "delay_method", "non_optimal_penalty"),
+            )
         self.training_stats = TrainingStats(
             training_mode=self.args.pipeline_mode,
             used_device=self.device.type,

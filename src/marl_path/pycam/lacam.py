@@ -107,7 +107,8 @@ class LaCAM:
                 self.grid, g,
                 model=self.model, device=self.device,
                 extractor=self.extractor, other_agents=other_agents,
-                other_agent_starts=other_agent_starts, penalty_scale=self.penalty_scale,
+                other_agent_starts=other_agent_starts, own_start=self.starts[i],
+                penalty_scale=self.penalty_scale,
                 bfs_cache=self.bfs_cache,
             ))
         self.pibt = PIBT(self.dist_tables)

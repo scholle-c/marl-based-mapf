@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from marl_path.shared import Grid
-from marl_path.shared.mapf_utils import get_neighbors
+from marl_path.shared.mapf_utils import greedy_bfs_path as _greedy_bfs_path
 
 BfsTableMap = dict[tuple[int, int], np.ndarray]
 
@@ -279,31 +279,6 @@ class RichAgentsChannelExtractor(FeatureExtractor):
         if self._use_coord_channels:
             tensor = _add_relative_coords(tensor, goal)
         return tensor
-
-
-def _greedy_bfs_path(
-    grid: Grid,
-    start: tuple[int, int],
-    goal: tuple[int, int],
-    bfs_table: np.ndarray,
-) -> list[tuple[int, int]]:
-    """Reconstruct the greedy BFS-descent path from `start` to `goal`.
-
-    At each step, move to the neighbor with the smallest distance-to-goal
-    (mirrors NonAStarPenaltyDelay.compute). `bfs_table` must be anchored at
-    `goal`. Guards against non-terminating loops on a disconnected/corrupt
-    table with a step cap — should never trigger on a connected grid.
-    """
-    current = start
-    path = [current]
-    max_steps = grid.size + 1
-    while current != goal and len(path) <= max_steps:
-        neighbors = get_neighbors(grid, current)
-        if not neighbors:
-            break
-        current = min(neighbors, key=lambda n: bfs_table[n])
-        path.append(current)
-    return path
 
 
 def _has_vertex_conflict(

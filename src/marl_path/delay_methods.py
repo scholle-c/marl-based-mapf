@@ -19,10 +19,24 @@ from collections import deque
 
 import numpy as np
 
-from marl_path.shared.mapf_utils import BfsCache, Coord, Grid, get_neighbors
+from marl_path.shared.mapf_utils import (
+    BfsCache,
+    Coord,
+    Grid,
+    get_neighbors,
+    greedy_bfs_path,
+)
 
 
 class DelayMethod(ABC):
+    #: True for delay methods whose target is a *correction* relative to the
+    #: agent's own unconstrained greedy path (target=1 where the greedy guess
+    #: needs flipping), rather than a direct on/off-CBS-path label. Consumers
+    #: (training metrics, DistTable inference) use this to decide whether the
+    #: raw model output must be XOR-recombined with the greedy-path mask
+    #: before it means "on path" / can be used as an additive delay.
+    is_delta_target: bool = False
+
     @abstractmethod
     def compute(
         self,
@@ -138,20 +152,54 @@ class NonAStarPenaltyDelay(DelayMethod):
 
         bfs_table = bfs_cache[goals[agent_idx]]
         goal = goals[agent_idx]
-
-        # Reconstruct the greedy BFS-descent path from start to goal: at each
-        # step, move to the neighbor with the smallest distance-to-goal.
-        current = paths[agent_idx][0]
-        a_star_path = [current]
-        while current != goal:
-            neighbors = get_neighbors(grid, current)
-            current = min(neighbors, key=lambda n: bfs_table[n])
-            a_star_path.append(current)
+        a_star_path = greedy_bfs_path(grid, paths[agent_idx][0], goal, bfs_table)
 
         for coord in a_star_path:
             delay_map[coord] = 0.0  # No penalty for cells on the A* path
 
         return delay_map
+
+
+class NonOptimalPenaltyDeltaDelay(DelayMethod):
+    """Delay = correction needed relative to the agent's own unconstrained
+    greedy path, not the full on/off-CBS-path mask.
+
+    NonOptimalPenaltyDelay's target agrees with the agent's own greedy path
+    almost everywhere — conflicts that force a real deviation are rare. A
+    model trained on the full mask can match most of it "for free" by
+    copying that greedy path (see report 2026-07-09 Testing learnability,
+    Versuch 5's copy-baseline finding), diluting the learning signal for the
+    rare cells that actually matter. This target isolates exactly those
+    cells:
+
+        base(v)   = 0 if v is on the agent's own greedy path, else 1
+        target(v) = 1 if base(v) != NonOptimalPenaltyDelay(v), else 0
+
+    i.e. target=1 exactly where the greedy-path guess needs correcting
+    (whether by adding a penalty the greedy path didn't have, or removing
+    one it did). Reconstructing the actual delay at inference time requires
+    XOR-recombining this prediction with the same greedy-path base — see
+    DistTable.compute_delay_model.
+    """
+
+    is_delta_target = True
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:
+        true_delay = NonOptimalPenaltyDelay().compute(
+            grid, bfs_cache, paths, goals, agent_idx
+        )
+        if not paths[agent_idx]:
+            return np.zeros(grid.shape, dtype=np.float32)
+
+        goal = goals[agent_idx]
+        bfs_table = bfs_cache[goal]
+        greedy_path = greedy_bfs_path(grid, paths[agent_idx][0], goal, bfs_table)
+
+        base_delay = np.ones(grid.shape, dtype=np.float32)
+        for coord in greedy_path:
+            base_delay[coord] = 0.0
+
+        return (base_delay != true_delay).astype(np.float32)
 
 
 class DiffusedFirstVisitDelay(DelayMethod):
@@ -419,6 +467,7 @@ DELAY_METHODS: dict[str, type[DelayMethod]] = {
     "random": RandomDelay,
     "non_optimal_penalty": NonOptimalPenaltyDelay,
     "non_optimal_penalty_bfs": NonOptimalPenaltyBFSDelay,
+    "non_optimal_penalty_delta": NonOptimalPenaltyDeltaDelay,
     "non_astar_penalty": NonAStarPenaltyDelay,
 }
 

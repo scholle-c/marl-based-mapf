@@ -43,6 +43,7 @@ def save_checkpoint(
             "hidden_channels": getattr(model, "_hidden_channels", None),
             "depth": getattr(model, "_depth", None),
         }
+    model_config["delay_target"] = getattr(model, "_delay_target", None)
     torch.save(
         {
             "state_dict": model.state_dict(),
@@ -100,6 +101,9 @@ def load_model(
         ).to(device)
     model.load_state_dict(state_dict)
     model.eval()
+    # nn.Module.__setattr__ is typed as Tensor | Module only — bypass it for
+    # this plain metadata attribute.
+    object.__setattr__(model, "_delay_target", model_config.get("delay_target"))
     return model, extractor
 
 

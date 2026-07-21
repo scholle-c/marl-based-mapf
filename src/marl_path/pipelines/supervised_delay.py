@@ -15,10 +15,10 @@ from __future__ import annotations
 import argparse
 import random
 from pathlib import Path
-from typing import cast
+from typing import Iterator
 
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
 from loguru import logger
 
 from marl_path.model import (
@@ -42,6 +42,17 @@ from .lacam_eval import (
 SEED_MAX = 2**32 - 1
 
 
+def _stream(dataset: Dataset) -> Iterator[DenseDelayBatchItem]:
+    """Yield dataset items lazily, one at a time.
+
+    Used instead of materializing a whole split into a resident list: each
+    DenseDelayBatchItem holds a full-grid tensor per agent, so eagerly loading
+    hundreds of multi-agent instances at once can exceed available RAM.
+    """
+    for i in range(len(dataset)):  # type: ignore[arg-type]
+        yield dataset[i]
+
+
 class SupervisedDelayPipeline(DefaultTrainingPipeline):
     """CBS-supervised delay training pipeline."""
 
@@ -62,12 +73,6 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             delay_method=delay_method,
         )
         train_ds, val_ds, train_loader, generator = self._split_dataset(dataset)
-        train_batch = cast(
-            list[DenseDelayBatchItem], [train_ds[i] for i in range(len(train_ds))]
-        )
-        val_batch = cast(
-            list[DenseDelayBatchItem], [val_ds[i] for i in range(len(val_ds))]
-        )
 
         logger.info(
             "Starting dense supervised training (delay_method={}): train_dir={}, "
@@ -85,15 +90,15 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
         )
         self._log_test_data_info(has_test_data, test_dir)
 
-        baseline_train = trivial_baseline_dense_loss(train_batch, pos_weight)
-        baseline_val = trivial_baseline_dense_loss(val_batch, pos_weight)
+        baseline_train = trivial_baseline_dense_loss(_stream(train_ds), pos_weight)
+        baseline_val = trivial_baseline_dense_loss(_stream(val_ds), pos_weight)
         logger.info(
             "  trivial 'always off-path' baseline BCE: train={:.4f}  val={:.4f}",
             baseline_train,
             baseline_val,
         )
 
-        test_batch: list[DenseDelayBatchItem] | None = None
+        test_dataset: CbsDataset | None = None
         if has_test_data:
             test_dataset = CbsDataset(
                 test_dir,
@@ -101,11 +106,7 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
                 device=self.device,
                 delay_method=delay_method,
             )
-            test_batch = cast(
-                list[DenseDelayBatchItem],
-                [test_dataset[i] for i in range(len(test_dataset))],
-            )
-            overlap = compute_cell_overlap(train_batch, test_batch)
+            overlap = compute_cell_overlap(_stream(train_ds), _stream(test_dataset))
             logger.info(
                 "  train/test on-path cell overlap: {:.1f}% "
                 "(high overlap + high test IoU/F1 suggests memorization, not generalization)",
@@ -127,10 +128,10 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             train_loss = sum(batch_losses) / len(batch_losses)
 
             val_loss = eval_dense_delay_loss(
-                self.model, val_batch, pos_weight=pos_weight
+                self.model, _stream(val_ds), pos_weight=pos_weight
             )
-            train_iou, train_f1 = compute_mask_iou_f1(self.model, train_batch)
-            val_iou, val_f1 = compute_mask_iou_f1(self.model, val_batch)
+            train_iou, train_f1 = compute_mask_iou_f1(self.model, _stream(train_ds))
+            val_iou, val_f1 = compute_mask_iou_f1(self.model, _stream(val_ds))
 
             test_metrics_text = ""
             extra: dict[str, float | None] = {
@@ -140,11 +141,13 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
                 "val_iou": val_iou,
                 "val_f1": val_f1,
             }
-            if test_batch is not None:
+            if test_dataset is not None:
                 test_loss = eval_dense_delay_loss(
-                    self.model, test_batch, pos_weight=pos_weight
+                    self.model, _stream(test_dataset), pos_weight=pos_weight
                 )
-                test_iou, test_f1 = compute_mask_iou_f1(self.model, test_batch)
+                test_iou, test_f1 = compute_mask_iou_f1(
+                    self.model, _stream(test_dataset)
+                )
                 extra.update(
                     {"test_bce": test_loss, "test_iou": test_iou, "test_f1": test_f1}
                 )

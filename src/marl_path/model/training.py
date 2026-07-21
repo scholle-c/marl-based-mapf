@@ -3,7 +3,7 @@
 from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, List, Sequence
+from typing import Any, Iterable, List, Sequence
 import torch
 import numpy as np
 
@@ -95,14 +95,17 @@ def update_dense_delay_from_batch(
 
 def eval_dense_delay_loss(
     model: Any,
-    batch: Sequence[DenseDelayBatchItem],
+    batch: Iterable[DenseDelayBatchItem],
     pos_weight: float = 0.05,
 ) -> float:
-    """Compute mean dense BCE loss over a batch without updating model weights."""
-    if not batch:
-        return float("nan")
+    """Compute mean dense BCE loss over a batch without updating model weights.
+
+    `batch` is consumed lazily (a generator over a dataset works fine) so a full
+    split never needs to be materialized in memory at once.
+    """
     model.eval()
     total_loss = 0.0
+    n = 0
     with torch.no_grad():
         for item in batch:
             logits = _batch_delay_logits(model, item.input_tensors)
@@ -112,18 +115,18 @@ def eval_dense_delay_loss(
                 logits[mask], item.targets[mask], pos_weight=weight
             )
             total_loss += loss.item()
-    return total_loss / len(batch)
+            n += 1
+    return total_loss / n if n else float("nan")
 
 
 def trivial_baseline_dense_loss(
-    batch: Sequence[DenseDelayBatchItem],
+    batch: Iterable[DenseDelayBatchItem],
     pos_weight: float = 0.05,
 ) -> float:
     """BCE loss of a constant "always predict off-path" model — the class-imbalance
     floor that any trained model's loss should be compared against."""
-    if not batch:
-        return float("nan")
     total_loss = 0.0
+    n = 0
     for item in batch:
         mask = item.free_mask.unsqueeze(0).expand_as(item.targets)
         logits = torch.full_like(item.targets, 10.0)  # sigmoid(10) ~= 1.0
@@ -132,12 +135,13 @@ def trivial_baseline_dense_loss(
             logits[mask], item.targets[mask], pos_weight=weight
         )
         total_loss += loss.item()
-    return total_loss / len(batch)
+        n += 1
+    return total_loss / n if n else float("nan")
 
 
 def compute_mask_iou_f1(
     model: Any,
-    batch: Sequence[DenseDelayBatchItem],
+    batch: Iterable[DenseDelayBatchItem],
     threshold: float = 0.5,
 ) -> tuple[float, float]:
     """IoU/F1 between the predicted "on-path" mask (sigmoid output < threshold) and
@@ -147,8 +151,6 @@ def compute_mask_iou_f1(
     This is the class-imbalance-robust metric: a model that always predicts
     "off-path" gets BCE that looks deceptively good but IoU/F1 == 0 here.
     """
-    if not batch:
-        return float("nan"), float("nan")
     model.eval()
     ious: list[float] = []
     f1s: list[float] = []
@@ -168,12 +170,14 @@ def compute_mask_iou_f1(
                 ious.append(tp / iou_denom if iou_denom else 1.0)
                 f1_denom = 2 * tp + fp + fn
                 f1s.append(2 * tp / f1_denom if f1_denom else 1.0)
+    if not ious:
+        return float("nan"), float("nan")
     return float(np.mean(ious)), float(np.mean(f1s))
 
 
 def compute_cell_overlap(
-    train_batch: Sequence[DenseDelayBatchItem],
-    test_batch: Sequence[DenseDelayBatchItem],
+    train_batch: Iterable[DenseDelayBatchItem],
+    test_batch: Iterable[DenseDelayBatchItem],
 ) -> float:
     """Fraction of free cells visited (target == 0, "on path") in the test split
     that were also visited somewhere in the train split.
@@ -182,7 +186,7 @@ def compute_cell_overlap(
     than generalization (see task's train/test diagnostic requirement).
     """
 
-    def _visited_cells(batch: Sequence[DenseDelayBatchItem]) -> set[tuple[int, int]]:
+    def _visited_cells(batch: Iterable[DenseDelayBatchItem]) -> set[tuple[int, int]]:
         visited: set[tuple[int, int]] = set()
         for item in batch:
             on_path = (item.targets < 0.5).cpu().numpy()

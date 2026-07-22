@@ -66,6 +66,7 @@ class EvalOnlyPipeline(DefaultTrainingPipeline):
             seed=self.args.seed,
             penalty_scale=getattr(self.args, "penalty_scale", 1.0),
             limit=eval_limit,
+            num_seeds=getattr(self.args, "eval_seeds", 1) or 1,
         )
         logger.info("Eval result:{}", track_b_log_suffix(self._eval_summary))
 

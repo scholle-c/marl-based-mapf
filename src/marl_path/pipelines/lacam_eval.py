@@ -107,11 +107,16 @@ def eval_test_instances(
     seed: int = 0,
     penalty_scale: float = 1.0,
     limit: int | None = None,
+    num_seeds: int = 1,
 ) -> LacamComparisonSummary:
     """Evaluate LaCAM (baseline, optionally vs model) on cached test instances.
 
-    Each test instance is run once with the given seed. CBS-optimal SOC is
-    read directly from the cached paths — no CBS re-execution needed.
+    Each test instance is run `num_seeds` times, with seeds `seed, seed+1,
+    ..., seed+num_seeds-1` (default 1 = old single-seed behaviour). Baseline
+    and model share the same seed per run so paired win-rate stays valid.
+    CBS-optimal SOC is read directly from the cached paths — no CBS
+    re-execution needed, so it's only computed once per instance regardless
+    of num_seeds.
 
     `model`: if None, only the vanilla-LaCAM baseline is run against
     CBS-optimal (no second, redundant LaCAM run) — useful to gauge the
@@ -124,14 +129,13 @@ def eval_test_instances(
     baseline_socs: list[float] = []
     model_socs: list[float] = []
     cbs_socs: list[float] = []
-    n_instances = 0
+    n_runs = 0
 
     npz_paths = sorted(test_dir.glob("*.npz"))
     if limit is not None:
         npz_paths = npz_paths[:limit]
 
     for npz_path in npz_paths:
-        n_instances += 1
         instance = CachedInstance.load(npz_path)
 
         grid = get_grid(instance.map_file)
@@ -142,40 +146,51 @@ def eval_test_instances(
         cbs_soc = _cbs_soc_from_cached_paths(instance.paths)
         cbs_socs.append(cbs_soc)
 
-        b_soc = _run_lacam_once(
-            grid, starts, goals, seed, time_limit_ms=time_limit_ms, flg_star=flg_star
-        )
-        m_soc = (
-            _run_lacam_once(
+        for seed_offset in range(num_seeds):
+            n_runs += 1
+            run_seed = seed + seed_offset
+            b_soc = _run_lacam_once(
                 grid,
                 starts,
                 goals,
-                seed,
-                model=model,
-                device=device,
-                extractor=extractor,
+                run_seed,
                 time_limit_ms=time_limit_ms,
                 flg_star=flg_star,
-                penalty_scale=penalty_scale,
             )
-            if model is not None
-            else None
-        )
+            m_soc = (
+                _run_lacam_once(
+                    grid,
+                    starts,
+                    goals,
+                    run_seed,
+                    model=model,
+                    device=device,
+                    extractor=extractor,
+                    time_limit_ms=time_limit_ms,
+                    flg_star=flg_star,
+                    penalty_scale=penalty_scale,
+                )
+                if model is not None
+                else None
+            )
 
-        if b_soc is not None:
-            baseline_socs.append(b_soc)
-        if model is not None and m_soc is not None:
-            model_socs.append(m_soc)
+            if b_soc is not None:
+                baseline_socs.append(b_soc)
+            if model is not None and m_soc is not None:
+                model_socs.append(m_soc)
 
-        logger.info(
-            "Test instance {}: soc_baseline={}  soc_model={}  soc_cbs={}",
-            npz_path.name,
-            b_soc if b_soc is not None else "FAIL",
-            (m_soc if m_soc is not None else "FAIL") if model is not None else "N/A",
-            cbs_soc,
-        )
+            logger.info(
+                "Test instance {} (seed={}): soc_baseline={}  soc_model={}  soc_cbs={}",
+                npz_path.name,
+                run_seed,
+                b_soc if b_soc is not None else "FAIL",
+                (m_soc if m_soc is not None else "FAIL")
+                if model is not None
+                else "N/A",
+                cbs_soc,
+            )
 
-    baseline_summary = _summarize_socs(baseline_socs, n_instances)
+    baseline_summary = _summarize_socs(baseline_socs, n_runs)
     cbs_mean: float | None = float(np.mean(cbs_socs)) if cbs_socs else None
 
     if model is None:
@@ -188,7 +203,7 @@ def eval_test_instances(
             cbs_socs=cbs_socs,
         )
 
-    model_summary = _summarize_socs(model_socs, n_instances)
+    model_summary = _summarize_socs(model_socs, n_runs)
     return LacamComparisonSummary(
         baseline=baseline_summary,
         model=model_summary,

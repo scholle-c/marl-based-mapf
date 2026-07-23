@@ -75,6 +75,7 @@ class LaCAM:
         seed: int = 0,
         verbose: int = 1,
         penalty_scale: float = 1.0,
+        fixed_priority: Optional[list[int]] = None,
     ) -> Configs:
         # set problem
         self.num_agents: int = len(starts)
@@ -85,6 +86,8 @@ class LaCAM:
         self.device: torch.device | None = device
         self.extractor: Optional[FeatureExtractor] = extractor
         self.penalty_scale: float = penalty_scale
+        # Optional static agent priority order
+        self.fixed_priority: Optional[list[int]] = fixed_priority
         self.deadline: Deadline = (
             deadline if deadline is not None else Deadline(time_limit_ms)
         )
@@ -235,6 +238,8 @@ class LaCAM:
         return cost
 
     def get_order(self, Q: Config) -> list[int]:
+        if self.fixed_priority is not None:
+            return list(self.fixed_priority)
         # e.g., by descending order of dist(Q[i], g_i)
         # Note that this is not an effective PIBT prioritization scheme
         order = list(range(self.num_agents))

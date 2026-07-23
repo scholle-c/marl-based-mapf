@@ -4,7 +4,7 @@ from marl_path.model import TrainingStats
 import numpy as np
 
 # Constants
-BASE_DIR = "./output"
+BASE_DIR = Path(__file__).resolve().parents[3] / "output"
 OVERVIEW_PAGE = "overview_page.py"
 
 # Variables

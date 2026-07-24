@@ -71,6 +71,7 @@ scripts/*
 !scripts/benchmark.bat
 !scripts/benchmark.sh
 !scripts/oracle_noise_sweep.py
+!scripts/binarized_vs_continuous_checkpoints.py
 
 # Git Hooks
 pyrightconfig.json

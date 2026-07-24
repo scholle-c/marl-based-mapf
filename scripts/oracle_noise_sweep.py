@@ -86,6 +86,8 @@ def run_sweep(
     flg_star: bool,
     seed: int,
     instance_limit: int | None,
+    round_to_int: bool = False,
+    zero_floor: float | None = None,
 ) -> list[dict]:
     test_dir, has_test = resolve_test_dir(dataset_dir)
     if not has_test:
@@ -154,6 +156,13 @@ def run_sweep(
                     ]
                 else:
                     noised = entry["exact_maps"]
+                if round_to_int:
+                    noised = [np.round(m).astype(np.float32) for m in noised]
+                if zero_floor is not None:
+                    noised = [
+                        np.where(m < zero_floor, 0.0, m).astype(np.float32)
+                        for m in noised
+                    ]
                 oracle_solution = LaCAM().solve(
                     grid=entry["grid"],
                     starts=entry["starts"],
@@ -225,6 +234,22 @@ def _parse_args() -> argparse.Namespace:
         help="Cap number of test instances used (all test/*.npz if omitted).",
     )
     parser.add_argument("--output-csv", type=Path, default=None)
+    parser.add_argument(
+        "--round",
+        action="store_true",
+        default=False,
+        help="Round noised delay maps to the nearest integer before use "
+        "(sanity check: for a binary target and magnitude < 0.5 this exactly "
+        "undoes the added noise).",
+    )
+    parser.add_argument(
+        "--zero-floor",
+        type=float,
+        default=None,
+        help="Snap noised values below this threshold to 0; values at/above "
+        "it are left untouched (asymmetric floor, unlike --round which also "
+        "rounds large values up to 1).",
+    )
     return parser.parse_args()
 
 
@@ -240,6 +265,8 @@ def main() -> None:
         flg_star=args.flg_star,
         seed=args.seed,
         instance_limit=args.instance_limit,
+        round_to_int=args.round,
+        zero_floor=args.zero_floor,
     )
     if args.output_csv is not None:
         args.output_csv.parent.mkdir(parents=True, exist_ok=True)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -595,3 +596,150 @@ class PathMembershipAgentsChannelExtractor(FeatureExtractor):
         if self._use_coord_channels:
             tensor = _add_relative_coords(tensor, goal)
         return tensor
+
+
+@dataclass
+class FovTokens:
+    """Variable-length, per-agent token set produced by FovPathExtractor.
+
+    coords:   (N, 2) long tensor of absolute (y, x) grid coordinates.
+    features: (N, n_channels) float tensor, index-aligned with coords.
+    has_other_agents: True if at least one other agent's path enters this
+        agent's FOV — cheap signal for callers that want to skip the model
+        call entirely (delay=0 everywhere) when no potential conflict exists,
+        per the "skip agents without conflicts" optimization.
+
+    N can be 0 (e.g. own_start/bfs_tables unavailable, mirroring the
+    all-zero-mask fallback of PathMembershipAgentsChannelExtractor).
+    """
+
+    coords: torch.Tensor
+    features: torch.Tensor
+    has_other_agents: bool = False
+
+
+def _build_fov_cells(
+    grid: Grid, path: list[tuple[int, int]], radius: int
+) -> set[tuple[int, int]]:
+    """Union of a (2*radius+1)-square Chebyshev ball around every cell of `path`,
+    restricted to in-bounds, traversable cells."""
+    height, width = grid.shape
+    cells: set[tuple[int, int]] = set()
+    for y, x in path:
+        for dy in range(-radius, radius + 1):
+            ny = y + dy
+            if ny < 0 or ny >= height:
+                continue
+            for dx in range(-radius, radius + 1):
+                nx = x + dx
+                if 0 <= nx < width and grid[ny, nx]:
+                    cells.add((ny, nx))
+    return cells
+
+
+class FovPathExtractor:
+    """Restricts the model's input to a field-of-view band around this agent's
+    own shortest path, instead of the full grid (see
+    `PathMembershipAgentsChannelExtractor`, the dense extractor this is
+    derived from).
+
+    FOV = union of a Chebyshev ball of radius `fov_radius` around every cell
+    of the agent's own greedy-BFS path. Other agents contribute their path's
+    intersection with that FOV *only* when their path actually enters it —
+    unlike the dense extractors, an other-agent whose path never comes near
+    agent i is dropped entirely rather than aggregated away to zero.
+
+    Per-token channels: is_own_start, is_goal, own_path_mask, own_path_time,
+    other_paths_mask, other_paths_time [, intersection_mask]. own_path_time /
+    other_paths_time follow the same normalized-timestep convention as
+    PathMembershipAgentsChannelExtractor (0=start, 1=goal; 0.0 off-path is
+    ambiguous without the corresponding mask channel).
+
+    Unlike FeatureExtractor subclasses, this does NOT implement extract() ->
+    (1, C, H, W): it returns a variable-length FovTokens set via
+    extract_tokens(), consumed by FovPatchTransformer (not
+    DistanceTableCNN/PatchTransformer, which need a fixed dense grid).
+
+    Falls back to an empty token set when `own_start`/`bfs_tables` aren't
+    available (needed to reconstruct this agent's own path).
+    """
+
+    def __init__(self, fov_radius: int = 2, include_intersection: bool = False):
+        self._fov_radius = fov_radius
+        self._include_intersection = include_intersection
+
+    @property
+    def n_channels(self) -> int:
+        return 7 if self._include_intersection else 6
+
+    def extract_tokens(
+        self,
+        grid: Grid,
+        goal: tuple[int, int],
+        other_agents: list[tuple[int, int]],
+        other_starts: Optional[list[tuple[int, int]]] = None,
+        own_start: Optional[tuple[int, int]] = None,
+        bfs_tables: Optional[BfsTableMap] = None,
+        device: torch.device | None = None,
+    ) -> FovTokens:
+        empty_coords = torch.zeros((0, 2), dtype=torch.long)
+        empty_features = torch.zeros((0, self.n_channels), dtype=torch.float32)
+        if own_start is None or not bfs_tables or goal not in bfs_tables:
+            return FovTokens(coords=empty_coords, features=empty_features)
+
+        own_path = _greedy_bfs_path(grid, own_start, goal, bfs_tables[goal])
+        fov_cells = _build_fov_cells(grid, own_path, self._fov_radius)
+        own_path_set = set(own_path)
+        n_own = len(own_path)
+        own_time = {
+            c: (t / (n_own - 1) if n_own > 1 else 0.0) for t, c in enumerate(own_path)
+        }
+
+        other_starts = other_starts or []
+        other_paths: list[list[tuple[int, int]]] = []
+        for other_goal, other_start in zip(other_agents, other_starts):
+            if other_goal not in bfs_tables:
+                continue
+            path = _greedy_bfs_path(grid, other_start, other_goal, bfs_tables[other_goal])
+            if any(c in fov_cells for c in path):
+                other_paths.append(path)
+
+        other_mask: dict[tuple[int, int], float] = {}
+        other_time: dict[tuple[int, int], float] = {}
+        for path in other_paths:
+            n = len(path)
+            for t, c in enumerate(path):
+                if c not in fov_cells:
+                    continue
+                tt = t / (n - 1) if n > 1 else 0.0
+                other_mask[c] = 1.0
+                if c not in other_time or tt < other_time[c]:
+                    other_time[c] = tt
+
+        coords = sorted(fov_cells)
+        rows: list[list[float]] = []
+        for c in coords:
+            on_path = c in own_path_set
+            o_mask = other_mask.get(c, 0.0)
+            row = [
+                1.0 if c == own_start else 0.0,
+                1.0 if c == goal else 0.0,
+                1.0 if on_path else 0.0,
+                own_time.get(c, 0.0),
+                o_mask,
+                other_time.get(c, 0.0),
+            ]
+            if self._include_intersection:
+                row.append(1.0 if on_path and o_mask > 0 else 0.0)
+            rows.append(row)
+
+        coords_t = torch.tensor(coords, dtype=torch.long) if coords else empty_coords
+        features_t = (
+            torch.tensor(rows, dtype=torch.float32) if rows else empty_features
+        )
+        if device is not None:
+            coords_t = coords_t.to(device)
+            features_t = features_t.to(device)
+        return FovTokens(
+            coords=coords_t, features=features_t, has_other_agents=bool(other_paths)
+        )

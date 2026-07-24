@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 from abc import ABC, abstractmethod
@@ -144,3 +146,116 @@ class PatchTransformer(DefaultModel):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass: (batch, C, H, W) -> (batch, 1, H, W) in [0, 1]."""
         return torch.sigmoid(self.forward_logits(x))
+
+
+def sinusoidal_encoding_2d(coords: torch.Tensor, embed_dim: int) -> torch.Tensor:
+    """Stateless 2D sinusoidal positional encoding.
+
+    Adapts the standard Transformer sinusoidal PE (Vaswani et al. 2017) from a
+    1D sequence index to 2D grid coordinates: embed_dim is split into two
+    halves, each encoding one axis (row, col) with its own sin/cos frequency
+    bands, then concatenated.
+
+    coords: (..., 2) long/float tensor of absolute (y, x) grid coordinates.
+    Returns (..., embed_dim).
+
+    Unlike PatchTransformer.pos_embed (a learned nn.Parameter table sized to
+    one specific grid_height*grid_width at construction time), this has no
+    parameters and is evaluated directly from each token's real coordinate —
+    it is defined for any coordinate value, so it generalizes to FOV token
+    sets of any size/shape and to map dimensions never seen during training.
+    """
+    if embed_dim % 4 != 0:
+        raise ValueError(
+            f"embed_dim ({embed_dim}) must be divisible by 4 for 2D sinusoidal PE "
+            "(split into sin/cos bands for each of 2 axes)."
+        )
+    quarter = embed_dim // 4
+    div_term = torch.exp(
+        torch.arange(0, quarter, dtype=torch.float32, device=coords.device)
+        * (-math.log(10000.0) / quarter)
+    )
+    y = coords[..., 0:1].to(torch.float32)
+    x = coords[..., 1:2].to(torch.float32)
+    y_angles = y * div_term
+    x_angles = x * div_term
+    return torch.cat(
+        [torch.sin(y_angles), torch.cos(y_angles), torch.sin(x_angles), torch.cos(x_angles)],
+        dim=-1,
+    )
+
+
+class FovPatchTransformer(DefaultModel):
+    """Token-based transformer for FOV-restricted, variable-length per-agent
+    inputs (see FovPathExtractor).
+
+    Unlike PatchTransformer, no grid size is baked in at construction: there
+    is no dense (C, H, W) input and no learned positional-embedding table.
+    Instead this consumes a padded batch of variable-length token sets and
+    injects position via `sinusoidal_encoding_2d`, evaluated from each
+    token's actual (y, x) coordinate — the same model handles any FOV size,
+    any map size, and map sizes never seen during training.
+
+    Inputs (forward_logits/forward):
+      features:     (B, N, in_channels)
+      coords:       (B, N, 2) long — absolute grid coordinates of each token
+      padding_mask: (B, N) bool, True at padding positions (passed straight
+                    through to nn.TransformerEncoder's src_key_padding_mask)
+
+    Output: one logit/probability per token, shape (B, N) — not a dense
+    (B, 1, H, W) grid. Callers that need a full grid (e.g. DistTable, which
+    indexes the delay table at arbitrary query coordinates during search)
+    scatter these per-token predictions back using `coords`, leaving
+    non-FOV cells at delay=0 (unchanged BFS heuristic) by construction.
+
+    Train with forward_logits() + BCEWithLogitsLoss, same convention as
+    DistanceTableCNN/PatchTransformer.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        embed_dim: int = 64,
+        num_layers: int = 4,
+        num_heads: int = 4,
+        mlp_dim: int | None = None,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self._in_channels = in_channels
+        self._embed_dim = embed_dim
+        self._num_layers = num_layers
+        self._num_heads = num_heads
+        self._mlp_dim = mlp_dim or embed_dim * 4
+
+        self.token_embed = nn.Linear(in_channels, embed_dim)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=self._mlp_dim,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.head = nn.Linear(embed_dim, 1)
+
+    def forward_logits(
+        self,
+        features: torch.Tensor,
+        coords: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        tokens = self.token_embed(features) + sinusoidal_encoding_2d(
+            coords, self._embed_dim
+        )
+        tokens = self.encoder(tokens, src_key_padding_mask=padding_mask)
+        return self.head(tokens).squeeze(-1)  # (B, N)
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        coords: torch.Tensor,
+        padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Forward pass: -> (batch, N) in [0, 1], one value per token."""
+        return torch.sigmoid(self.forward_logits(features, coords, padding_mask))

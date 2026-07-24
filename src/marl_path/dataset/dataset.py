@@ -10,8 +10,13 @@ from torch.utils.data import Dataset
 
 from marl_path.shared.mapf_utils import BfsCache, get_grid, get_scenario
 from marl_path.delay_methods import DelayMethod
-from marl_path.model.feature_extraction import BasicExtractor, FeatureExtractor
-from marl_path.model.training import DenseDelayBatchItem, prepare_dense_delay_batch_item
+from marl_path.model.feature_extraction import BasicExtractor, FeatureExtractor, FovPathExtractor
+from marl_path.model.training import (
+    DenseDelayBatchItem,
+    prepare_dense_delay_batch_item,
+    FovDelayBatchItem,
+    prepare_fov_delay_batch_item,
+)
 from .instance import CachedInstance
 
 
@@ -43,7 +48,7 @@ class CbsDataset(Dataset):
     def __len__(self) -> int:
         return len(self._files)
 
-    def __getitem__(self, idx: int) -> DenseDelayBatchItem:
+    def __getitem__(self, idx: int) -> DenseDelayBatchItem | FovDelayBatchItem:
         instance = CachedInstance.load(self._files[idx])
         grid = get_grid(instance.map_file)
         # agent_indices may be a non-contiguous subset, so load all and select.
@@ -51,12 +56,19 @@ class CbsDataset(Dataset):
         bfs_cache = BfsCache(grid)
 
         # Mirrors DistTable.compute_delay_model: other_agents = other agents' goals,
-        # and the "start" slot in the extractor receives this agent's own goal (the
-        # model predicts a delay field anchored at the goal, independent of the
+        # and the "start"/goal slot in the extractor receives this agent's own goal
+        # (the model predicts a delay field anchored at the goal, independent of the
         # agent's current position).
         all_goals = [all_scen_goals[i] for i in instance.agent_indices]
         all_starts = [all_scen_starts[i] for i in instance.agent_indices]
 
+        if isinstance(self._extractor, FovPathExtractor):
+            return self._getitem_fov(instance, grid, bfs_cache, all_goals, all_starts)
+        return self._getitem_dense(instance, grid, bfs_cache, all_goals, all_starts)
+
+    def _getitem_dense(
+        self, instance, grid, bfs_cache, all_goals, all_starts
+    ) -> DenseDelayBatchItem:
         input_tensors: list[torch.Tensor] = []
         for i in range(len(instance.paths)):
             goal = all_goals[i]
@@ -87,5 +99,38 @@ class CbsDataset(Dataset):
             all_goals,
             self._device,
             input_tensors,
+            self._delay_method,
+        )
+
+    def _getitem_fov(
+        self, instance, grid, bfs_cache, all_goals, all_starts
+    ) -> FovDelayBatchItem:
+        tokens_per_agent = []
+        for i in range(len(instance.paths)):
+            goal = all_goals[i]
+            other_goals = [all_goals[j] for j in range(len(all_goals)) if j != i]
+            other_starts = [all_starts[j] for j in range(len(all_starts)) if j != i]
+            other_bfs = {g: bfs_cache[g] for g in other_goals}
+            other_bfs.update({s: bfs_cache[s] for s in other_starts})
+            other_bfs[goal] = bfs_cache[goal]
+
+            tokens = self._extractor.extract_tokens(
+                grid,
+                goal=goal,
+                other_agents=other_goals,
+                other_starts=other_starts,
+                own_start=all_starts[i],
+                bfs_tables=other_bfs,
+                device=self._device,
+            )
+            tokens_per_agent.append(tokens)
+
+        return prepare_fov_delay_batch_item(
+            grid,
+            bfs_cache,
+            instance.paths,
+            all_goals,
+            self._device,
+            tokens_per_agent,
             self._delay_method,
         )

@@ -6,7 +6,7 @@ from typing import Optional
 
 from marl_path.shared.mapf_utils import BfsCache, Coord, Grid, is_valid_coord
 from marl_path.model.definition import DefaultModel
-from marl_path.model.feature_extraction import FeatureExtractor, BasicExtractor
+from marl_path.model.feature_extraction import FeatureExtractor, BasicExtractor, FovPathExtractor
 
 
 @dataclass
@@ -19,6 +19,7 @@ class DistTable:
     input_tensor: Optional[torch.Tensor] = None
     other_agents: list[Coord] = field(default_factory=lambda: [])
     other_agent_starts: list[Coord] = field(default_factory=lambda: [])
+    own_start: Optional[Coord] = None
     penalty_scale: float = 1.0
     bfs_cache: BfsCache = field(kw_only=True, repr=False)
     table: np.ndarray = field(init=False)  # distance heuristic (BFS)
@@ -44,9 +45,42 @@ class DistTable:
     def compute_delay_model(self, target: Coord) -> np.ndarray:
         other_bfs = {g: self.bfs_cache[g] for g in self.other_agents}
         other_bfs.update({s: self.bfs_cache[s] for s in self.other_agent_starts})
+        # Own goal's BFS table, needed by extractors that reconstruct this
+        # agent's individual shortest path (own_start -> goal), e.g.
+        # PathMembershipAgentsChannelExtractor/FovPathExtractor. Without this,
+        # `goal in bfs_tables` is False and those extractors silently fall
+        # back to an all-zero own-path signal — a train/inference mismatch,
+        # since CbsDataset always supplies it during training.
+        other_bfs[self.goal] = self.bfs_cache[self.goal]
+
+        if isinstance(self.extractor, FovPathExtractor):
+            tokens = self.extractor.extract_tokens(
+                self.grid, self.goal, self.other_agents,
+                other_starts=self.other_agent_starts, own_start=self.own_start,
+                bfs_tables=other_bfs, device=self.device,
+            )
+            delay = np.zeros(self.grid.shape, dtype=np.float32)
+            if tokens.coords.shape[0] > 0:
+                with torch.no_grad():
+                    probs: np.ndarray = (
+                        self.model(  # type: ignore
+                            tokens.features.unsqueeze(0), tokens.coords.unsqueeze(0)
+                        )
+                        .squeeze(0)
+                        .cpu()
+                        .numpy()
+                    )
+                ys = tokens.coords[:, 0].cpu().numpy()
+                xs = tokens.coords[:, 1].cpu().numpy()
+                # Cells outside the FOV keep delay=0 (unchanged BFS heuristic) by
+                # construction — the model only ever adjusts cells it was shown.
+                delay[ys, xs] = probs
+            return delay * self.penalty_scale
+
         self.input_tensor = self.extractor.extract(  # type: ignore[union-attr]
             self.grid, self.goal, target, self.other_agents, device=self.device,
             bfs_tables=other_bfs, other_starts=self.other_agent_starts,
+            own_start=self.own_start,
         )
         with torch.no_grad():
             output: torch.Tensor = self.model(self.input_tensor)  # type: ignore

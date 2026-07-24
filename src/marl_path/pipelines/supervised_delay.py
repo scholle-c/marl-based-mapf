@@ -28,6 +28,13 @@ from marl_path.model import (
     trivial_baseline_dense_loss,
     compute_mask_iou_f1,
     compute_cell_overlap,
+    FovDelayBatchItem,
+    update_fov_delay_from_batch,
+    eval_fov_delay_loss,
+    trivial_baseline_fov_loss,
+    compute_fov_mask_iou_f1,
+    compute_fov_cell_overlap,
+    FovPathExtractor,
 )
 from marl_path.delay_methods import get_delay_method
 from marl_path.dataset import CbsDataset
@@ -42,12 +49,13 @@ from .lacam_eval import (
 SEED_MAX = 2**32 - 1
 
 
-def _stream(dataset: Dataset) -> Iterator[DenseDelayBatchItem]:
+def _stream(dataset: Dataset) -> Iterator[DenseDelayBatchItem | FovDelayBatchItem]:
     """Yield dataset items lazily, one at a time.
 
     Used instead of materializing a whole split into a resident list: each
-    DenseDelayBatchItem holds a full-grid tensor per agent, so eagerly loading
-    hundreds of multi-agent instances at once can exceed available RAM.
+    batch item holds a per-agent tensor (full-grid for DenseDelayBatchItem,
+    FOV-token for FovDelayBatchItem), so eagerly loading hundreds of
+    multi-agent instances at once can exceed available RAM.
     """
     for i in range(len(dataset)):  # type: ignore[arg-type]
         yield dataset[i]
@@ -65,6 +73,13 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             getattr(self.args, "delay_method", "non_optimal_penalty")
         )
         pos_weight = getattr(self.args, "pos_weight", 0.05)
+
+        is_fov = isinstance(self.extractor, FovPathExtractor)
+        update_fn = update_fov_delay_from_batch if is_fov else update_dense_delay_from_batch
+        eval_fn = eval_fov_delay_loss if is_fov else eval_dense_delay_loss
+        baseline_fn = trivial_baseline_fov_loss if is_fov else trivial_baseline_dense_loss
+        iou_f1_fn = compute_fov_mask_iou_f1 if is_fov else compute_mask_iou_f1
+        overlap_fn = compute_fov_cell_overlap if is_fov else compute_cell_overlap
 
         dataset = CbsDataset(
             train_dir,
@@ -90,8 +105,8 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
         )
         self._log_test_data_info(has_test_data, test_dir)
 
-        baseline_train = trivial_baseline_dense_loss(_stream(train_ds), pos_weight)
-        baseline_val = trivial_baseline_dense_loss(_stream(val_ds), pos_weight)
+        baseline_train = baseline_fn(_stream(train_ds), pos_weight)
+        baseline_val = baseline_fn(_stream(val_ds), pos_weight)
         logger.info(
             "  trivial 'always off-path' baseline BCE: train={:.4f}  val={:.4f}",
             baseline_train,
@@ -106,7 +121,7 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
                 device=self.device,
                 delay_method=delay_method,
             )
-            overlap = compute_cell_overlap(_stream(train_ds), _stream(test_dataset))
+            overlap = overlap_fn(_stream(train_ds), _stream(test_dataset))
             logger.info(
                 "  train/test on-path cell overlap: {:.1f}% "
                 "(high overlap + high test IoU/F1 suggests memorization, not generalization)",
@@ -121,17 +136,17 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             # ── Track A: training ──────────────────────────────────────────
             batch_losses: list[float] = []
             for batch in train_loader:
-                loss = update_dense_delay_from_batch(
+                loss = update_fn(
                     self.model, self.optimizer, batch, pos_weight=pos_weight
                 )
                 batch_losses.append(loss)
             train_loss = sum(batch_losses) / len(batch_losses)
 
-            val_loss = eval_dense_delay_loss(
+            val_loss = eval_fn(
                 self.model, _stream(val_ds), pos_weight=pos_weight
             )
-            train_iou, train_f1 = compute_mask_iou_f1(self.model, _stream(train_ds))
-            val_iou, val_f1 = compute_mask_iou_f1(self.model, _stream(val_ds))
+            train_iou, train_f1 = iou_f1_fn(self.model, _stream(train_ds))
+            val_iou, val_f1 = iou_f1_fn(self.model, _stream(val_ds))
 
             test_metrics_text = ""
             extra: dict[str, float | None] = {
@@ -142,10 +157,10 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
                 "val_f1": val_f1,
             }
             if test_dataset is not None:
-                test_loss = eval_dense_delay_loss(
+                test_loss = eval_fn(
                     self.model, _stream(test_dataset), pos_weight=pos_weight
                 )
-                test_iou, test_f1 = compute_mask_iou_f1(
+                test_iou, test_f1 = iou_f1_fn(
                     self.model, _stream(test_dataset)
                 )
                 extra.update(

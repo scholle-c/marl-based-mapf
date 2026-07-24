@@ -5,7 +5,7 @@ to load a model and run a forward pass.
 
 from __future__ import annotations
 
-from .definition import DefaultModel, DistanceTableCNN, PatchTransformer
+from .definition import DefaultModel, DistanceTableCNN, PatchTransformer, FovPatchTransformer
 from .feature_extraction import (
     FeatureExtractor,
     BasicExtractor,
@@ -14,6 +14,7 @@ from .feature_extraction import (
     RichAgentsChannelExtractor,
     CollisionAwareAgentsChannelExtractor,
     PathMembershipAgentsChannelExtractor,
+    FovPathExtractor,
 )
 from marl_path.shared.mapf_utils import BfsCache
 import torch
@@ -25,7 +26,15 @@ def save_checkpoint(
     model: DefaultModel, extractor: FeatureExtractor, path: str
 ) -> None:
     """Save model weights, extractor config, and model architecture together."""
-    if isinstance(model, PatchTransformer):
+    if isinstance(model, FovPatchTransformer):
+        model_config = {
+            "arch": "fov_transformer",
+            "in_channels": extractor.n_channels,
+            "vit_embed_dim": model._embed_dim,
+            "vit_layers": model._num_layers,
+            "vit_heads": model._num_heads,
+        }
+    elif isinstance(model, PatchTransformer):
         model_config = {
             "arch": "vit",
             "in_channels": extractor.n_channels,
@@ -54,6 +63,7 @@ def save_checkpoint(
                     extractor, "_include_intersection", None
                 ),
                 "encode_time": getattr(extractor, "_encode_time", None),
+                "fov_radius": getattr(extractor, "_fov_radius", None),
             },
             "model_config": model_config,
         },
@@ -82,7 +92,14 @@ def load_model(
         model_config = {}
         arch = "cnn"
 
-    if arch == "vit":
+    if arch == "fov_transformer":
+        model = FovPatchTransformer(
+            in_channels=in_channels,
+            embed_dim=model_config.get("vit_embed_dim") or 64,
+            num_layers=model_config.get("vit_layers") or 4,
+            num_heads=model_config.get("vit_heads") or 4,
+        ).to(device)
+    elif arch == "vit":
         model = PatchTransformer(
             in_channels=in_channels,
             grid_height=model_config.get("grid_height", 32),
@@ -158,6 +175,31 @@ def predict_distance_table(
     bfs_tables[goal] = bfs_cache[goal]
 
     device = next(model.parameters()).device
+
+    if isinstance(extractor, FovPathExtractor):
+        tokens = extractor.extract_tokens(
+            grid_np,
+            goal,
+            other_agents,
+            other_starts=other_starts,
+            own_start=start,
+            bfs_tables=bfs_tables,
+            device=device,
+        )
+        prediction = np.zeros(grid_np.shape, dtype=np.float32)
+        if tokens.coords.shape[0] > 0:
+            with torch.no_grad():
+                probs = (
+                    model(tokens.features.unsqueeze(0), tokens.coords.unsqueeze(0))
+                    .squeeze(0)
+                    .cpu()
+                    .numpy()
+                )
+            ys = tokens.coords[:, 0].cpu().numpy()
+            xs = tokens.coords[:, 1].cpu().numpy()
+            prediction[ys, xs] = probs
+        return prediction
+
     input_tensor = extractor.extract(
         grid_np,
         goal,
@@ -194,5 +236,10 @@ def _extractor_from_config(config: dict | None) -> FeatureExtractor:
             include_intersection=bool(config.get("include_intersection")),
             encode_time=bool(config.get("encode_time")),
             use_coord_channels=use_coord,
+        )
+    if cls_name == "FovPathExtractor":
+        return FovPathExtractor(
+            fov_radius=config.get("fov_radius") or 2,
+            include_intersection=bool(config.get("include_intersection")),
         )
     return BasicExtractor(use_coord_channels=use_coord)

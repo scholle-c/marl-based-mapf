@@ -12,6 +12,7 @@ from marl_path.model import (
     DefaultModel,
     DistanceTableCNN,
     PatchTransformer,
+    FovPatchTransformer,
     load_model,
     pretrain_on_default_value,
     pretrain_on_bfs,
@@ -24,6 +25,7 @@ from marl_path.model import (
     RichAgentsChannelExtractor,
     CollisionAwareAgentsChannelExtractor,
     PathMembershipAgentsChannelExtractor,
+    FovPathExtractor,
 )
 from marl_path.model.inference import save_checkpoint
 from marl_path.shared.mapf_utils import get_grid, get_scenario
@@ -95,6 +97,7 @@ class DefaultTrainingPipeline(DefaultPipeline):
             vit_embed_dim=getattr(self.args, "vit_embed_dim", 64),
             vit_layers=getattr(self.args, "vit_layers", 4),
             vit_heads=getattr(self.args, "vit_heads", 4),
+            fov_radius=getattr(self.args, "fov_radius", 2),
         )
         self.training_stats = TrainingStats(
             training_mode=self.args.pipeline_mode,
@@ -168,6 +171,7 @@ def _initialize_model(
     vit_embed_dim: int = 64,
     vit_layers: int = 4,
     vit_heads: int = 4,
+    fov_radius: int = 2,
 ) -> tuple[DefaultModel, FeatureExtractor]:
     if path is not None:
         return load_model(path, device=device)
@@ -202,6 +206,8 @@ def _initialize_model(
         extractor = PathMembershipAgentsChannelExtractor(
             agents_filter="all", include_intersection=True, encode_time=True
         )
+    elif extractor_type == consts.EXTRACTOR_FOV_PATH:
+        extractor = FovPathExtractor(fov_radius=fov_radius)
     else:
         extractor = BasicExtractor()
 
@@ -220,12 +226,29 @@ def _initialize_model(
             num_layers=vit_layers,
             num_heads=vit_heads,
         ).to(device)
+    elif model_arch == "fov_transformer":
+        # No grid dimensions needed: position comes from a stateless 2D
+        # sinusoidal encoding of each token's actual coordinate, not a
+        # learned table sized to one specific grid — see FovPatchTransformer.
+        model = FovPatchTransformer(
+            in_channels=extractor.n_channels,
+            embed_dim=vit_embed_dim,
+            num_layers=vit_layers,
+            num_heads=vit_heads,
+        ).to(device)
     else:
         model = DistanceTableCNN(
             in_channels=extractor.n_channels,
             hidden_channels=hidden_channels,
             depth=depth,
         ).to(device)
+    if model_initialization_mode != 0 and isinstance(extractor, FovPathExtractor):
+        raise ValueError(
+            "--model-initialization-mode 1/2 (pretrain on default/BFS value) "
+            "isn't supported with the fov_path extractor: those pretraining "
+            "routines call extractor.extract() for a dense (1, C, H, W) "
+            "tensor, but FovPathExtractor only implements extract_tokens()."
+        )
     if model_initialization_mode == 1:
         logger.info("applying pretraining on default values...")
         pretrain_optimizer = torch.optim.Adam(model.parameters(), lr=0.001)

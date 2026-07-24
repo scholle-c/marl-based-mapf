@@ -195,7 +195,18 @@ def main():
             consts.EXTRACTOR_PATH_ALL_AGENTS_INTERSECTION,
             consts.EXTRACTOR_PATH_ALL_AGENTS_TIME,
             consts.EXTRACTOR_PATH_ALL_AGENTS_INTERSECTION_TIME,
+            consts.EXTRACTOR_FOV_PATH,
         ],
+    )
+    parser.add_argument(
+        "--fov-radius",
+        type=int,
+        default=2,
+        help=(
+            "fov_path extractor only: Chebyshev radius around every cell of "
+            "the agent's own shortest path that counts as 'in FOV' (default: "
+            "2, i.e. a 5-cell-wide corridor)."
+        ),
     )
     parser.add_argument(
         "--hidden-channels",
@@ -213,11 +224,16 @@ def main():
         "--model-arch",
         type=str,
         default="cnn",
-        choices=["cnn", "vit"],
+        choices=["cnn", "vit", "fov_transformer"],
         help=(
             "'cnn': DistanceTableCNN (default). "
             "'vit': from-scratch PatchTransformer (not a pretrained torchvision "
-            "ViT — see --vit-* flags), needs --map-file for grid dimensions."
+            "ViT — see --vit-* flags), needs --map-file for grid dimensions. "
+            "'fov_transformer': FovPatchTransformer, pairs with "
+            "--feature-extractor-type fov_path — variable-length token input, "
+            "no grid dimensions needed (2D sinusoidal positional encoding "
+            "instead of a learned, grid-size-fixed embedding table; also "
+            "configured via --vit-embed-dim/--vit-layers/--vit-heads)."
         ),
     )
     parser.add_argument(
@@ -230,19 +246,19 @@ def main():
         "--vit-embed-dim",
         type=int,
         default=64,
-        help="PatchTransformer token embedding dimension (default: 64).",
+        help="PatchTransformer/FovPatchTransformer token embedding dimension (default: 64).",
     )
     parser.add_argument(
         "--vit-layers",
         type=int,
         default=4,
-        help="PatchTransformer number of encoder layers (default: 4).",
+        help="PatchTransformer/FovPatchTransformer number of encoder layers (default: 4).",
     )
     parser.add_argument(
         "--vit-heads",
         type=int,
         default=4,
-        help="PatchTransformer number of attention heads (default: 4).",
+        help="PatchTransformer/FovPatchTransformer number of attention heads (default: 4).",
     )
     parser.add_argument(
         "--model-file",

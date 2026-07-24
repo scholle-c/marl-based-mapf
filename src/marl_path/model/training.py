@@ -59,11 +59,36 @@ def _batch_delay_logits(model: Any, input_tensors: List[torch.Tensor]) -> torch.
     return model.forward_logits(batched).squeeze(1)  # (num_agents, H, W)
 
 
+def _fn_penalty_weight(
+    targets: torch.Tensor, fn_penalty: float
+) -> torch.Tensor | None:
+    """Element-wise BCE weight that additionally up-weights errors on true
+    on-path cells (target == 0) by `fn_penalty`, layered on top of
+    pos_weight's class-frequency correction (which only scales the
+    target == 1 term).
+
+    Motivated by the label-noise sweep in "Mini-Warehouse 35 agents oracle
+    headroom": false negatives on real CBS-path cells (predicted "off-path"
+    when the true label is "on-path") collapse LaCAM's downstream search far
+    more than false positives on neighboring off-path cells, at matched error
+    rates. fn_penalty == 1.0 (default) returns None, i.e. no change from
+    plain pos_weight-only weighting.
+    """
+    if fn_penalty == 1.0:
+        return None
+    return torch.where(
+        targets == 0,
+        torch.full_like(targets, fn_penalty),
+        torch.ones_like(targets),
+    )
+
+
 def update_dense_delay_from_batch(
     model: Any,
     optimizer: Any,
     batch: Sequence[DenseDelayBatchItem],
     pos_weight: float = 0.05,
+    fn_penalty: float = 1.0,
 ) -> float:
     """BCEWithLogitsLoss over every free cell of the grid (not just path cells),
     for every agent.
@@ -71,6 +96,8 @@ def update_dense_delay_from_batch(
     pos_weight scales the majority class (label 1 = "off optimal path") down
     relative to the minority class (label 0 = "on path"), since that majority
     otherwise dominates the loss. Start with inverse class frequency and tune.
+    fn_penalty additionally up-weights errors specifically on on-path cells
+    (see _fn_penalty_weight) — orthogonal to pos_weight's class-balance role.
     """
     if not batch:
         return float("nan")
@@ -82,8 +109,12 @@ def update_dense_delay_from_batch(
         logits = _batch_delay_logits(model, item.input_tensors)
         mask = item.free_mask.unsqueeze(0).expand_as(logits)
         weight = torch.tensor(pos_weight, device=logits.device)
+        targets_masked = item.targets[mask]
         loss = torch.nn.functional.binary_cross_entropy_with_logits(
-            logits[mask], item.targets[mask], pos_weight=weight
+            logits[mask],
+            targets_masked,
+            weight=_fn_penalty_weight(targets_masked, fn_penalty),
+            pos_weight=weight,
         )
         loss.backward()
         total_loss += loss.item()
@@ -97,6 +128,7 @@ def eval_dense_delay_loss(
     model: Any,
     batch: Iterable[DenseDelayBatchItem],
     pos_weight: float = 0.05,
+    fn_penalty: float = 1.0,
 ) -> float:
     """Compute mean dense BCE loss over a batch without updating model weights.
 
@@ -111,8 +143,12 @@ def eval_dense_delay_loss(
             logits = _batch_delay_logits(model, item.input_tensors)
             mask = item.free_mask.unsqueeze(0).expand_as(logits)
             weight = torch.tensor(pos_weight, device=logits.device)
+            targets_masked = item.targets[mask]
             loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                logits[mask], item.targets[mask], pos_weight=weight
+                logits[mask],
+                targets_masked,
+                weight=_fn_penalty_weight(targets_masked, fn_penalty),
+                pos_weight=weight,
             )
             total_loss += loss.item()
             n += 1
@@ -122,6 +158,7 @@ def eval_dense_delay_loss(
 def trivial_baseline_dense_loss(
     batch: Iterable[DenseDelayBatchItem],
     pos_weight: float = 0.05,
+    fn_penalty: float = 1.0,
 ) -> float:
     """BCE loss of a constant "always predict off-path" model — the class-imbalance
     floor that any trained model's loss should be compared against."""
@@ -131,8 +168,12 @@ def trivial_baseline_dense_loss(
         mask = item.free_mask.unsqueeze(0).expand_as(item.targets)
         logits = torch.full_like(item.targets, 10.0)  # sigmoid(10) ~= 1.0
         weight = torch.tensor(pos_weight, device=item.targets.device)
+        targets_masked = item.targets[mask]
         loss = torch.nn.functional.binary_cross_entropy_with_logits(
-            logits[mask], item.targets[mask], pos_weight=weight
+            logits[mask],
+            targets_masked,
+            weight=_fn_penalty_weight(targets_masked, fn_penalty),
+            pos_weight=weight,
         )
         total_loss += loss.item()
         n += 1
@@ -271,6 +312,7 @@ def update_fov_delay_from_batch(
     optimizer: Any,
     batch: Sequence[FovDelayBatchItem],
     pos_weight: float = 0.05,
+    fn_penalty: float = 1.0,
 ) -> float:
     """BCEWithLogitsLoss over each agent's FOV tokens only (padding excluded),
     mirroring update_dense_delay_from_batch's convention for the token-based
@@ -288,8 +330,12 @@ def update_fov_delay_from_batch(
             continue
         logits = _batch_fov_delay_logits(model, item)
         weight = torch.tensor(pos_weight, device=logits.device)
+        targets_valid = item.targets[valid]
         loss = torch.nn.functional.binary_cross_entropy_with_logits(
-            logits[valid], item.targets[valid], pos_weight=weight
+            logits[valid],
+            targets_valid,
+            weight=_fn_penalty_weight(targets_valid, fn_penalty),
+            pos_weight=weight,
         )
         loss.backward()
         total_loss += loss.item()
@@ -304,6 +350,7 @@ def eval_fov_delay_loss(
     model: Any,
     batch: Iterable[FovDelayBatchItem],
     pos_weight: float = 0.05,
+    fn_penalty: float = 1.0,
 ) -> float:
     """Compute mean FOV-token BCE loss over a batch without updating model weights."""
     model.eval()
@@ -316,8 +363,12 @@ def eval_fov_delay_loss(
                 continue
             logits = _batch_fov_delay_logits(model, item)
             weight = torch.tensor(pos_weight, device=logits.device)
+            targets_valid = item.targets[valid]
             loss = torch.nn.functional.binary_cross_entropy_with_logits(
-                logits[valid], item.targets[valid], pos_weight=weight
+                logits[valid],
+                targets_valid,
+                weight=_fn_penalty_weight(targets_valid, fn_penalty),
+                pos_weight=weight,
             )
             total_loss += loss.item()
             n += 1
@@ -327,6 +378,7 @@ def eval_fov_delay_loss(
 def trivial_baseline_fov_loss(
     batch: Iterable[FovDelayBatchItem],
     pos_weight: float = 0.05,
+    fn_penalty: float = 1.0,
 ) -> float:
     """BCE loss of a constant "always predict off-path" model, over FOV tokens only."""
     total_loss = 0.0
@@ -337,8 +389,12 @@ def trivial_baseline_fov_loss(
             continue
         logits = torch.full_like(item.targets, 10.0)  # sigmoid(10) ~= 1.0
         weight = torch.tensor(pos_weight, device=item.targets.device)
+        targets_valid = item.targets[valid]
         loss = torch.nn.functional.binary_cross_entropy_with_logits(
-            logits[valid], item.targets[valid], pos_weight=weight
+            logits[valid],
+            targets_valid,
+            weight=_fn_penalty_weight(targets_valid, fn_penalty),
+            pos_weight=weight,
         )
         total_loss += loss.item()
         n += 1

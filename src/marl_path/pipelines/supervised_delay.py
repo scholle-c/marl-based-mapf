@@ -73,6 +73,7 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             getattr(self.args, "delay_method", "non_optimal_penalty")
         )
         pos_weight = getattr(self.args, "pos_weight", 0.05)
+        fn_penalty = getattr(self.args, "fn_penalty", 1.0)
 
         is_fov = isinstance(self.extractor, FovPathExtractor)
         update_fn = update_fov_delay_from_batch if is_fov else update_dense_delay_from_batch
@@ -92,7 +93,7 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
         logger.info(
             "Starting dense supervised training (delay_method={}): train_dir={}, "
             "dataset={} instances ({} train / {} val), epochs={}, lr={}, pos_weight={}, "
-            "device={}",
+            "fn_penalty={}, device={}",
             type(delay_method).__name__,
             train_dir,
             len(dataset),
@@ -101,12 +102,13 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             self.args.epochs,
             self.args.lr,
             pos_weight,
+            fn_penalty,
             self.device.type,
         )
         self._log_test_data_info(has_test_data, test_dir)
 
-        baseline_train = baseline_fn(_stream(train_ds), pos_weight)
-        baseline_val = baseline_fn(_stream(val_ds), pos_weight)
+        baseline_train = baseline_fn(_stream(train_ds), pos_weight, fn_penalty)
+        baseline_val = baseline_fn(_stream(val_ds), pos_weight, fn_penalty)
         logger.info(
             "  trivial 'always off-path' baseline BCE: train={:.4f}  val={:.4f}",
             baseline_train,
@@ -137,13 +139,17 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             batch_losses: list[float] = []
             for batch in train_loader:
                 loss = update_fn(
-                    self.model, self.optimizer, batch, pos_weight=pos_weight
+                    self.model,
+                    self.optimizer,
+                    batch,
+                    pos_weight=pos_weight,
+                    fn_penalty=fn_penalty,
                 )
                 batch_losses.append(loss)
             train_loss = sum(batch_losses) / len(batch_losses)
 
             val_loss = eval_fn(
-                self.model, _stream(val_ds), pos_weight=pos_weight
+                self.model, _stream(val_ds), pos_weight=pos_weight, fn_penalty=fn_penalty
             )
             train_iou, train_f1 = iou_f1_fn(self.model, _stream(train_ds))
             val_iou, val_f1 = iou_f1_fn(self.model, _stream(val_ds))
@@ -158,7 +164,10 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             }
             if test_dataset is not None:
                 test_loss = eval_fn(
-                    self.model, _stream(test_dataset), pos_weight=pos_weight
+                    self.model,
+                    _stream(test_dataset),
+                    pos_weight=pos_weight,
+                    fn_penalty=fn_penalty,
                 )
                 test_iou, test_f1 = iou_f1_fn(
                     self.model, _stream(test_dataset)

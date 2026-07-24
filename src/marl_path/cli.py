@@ -92,6 +92,19 @@ def main():
             "at inference (DistTable.compute_delay_model) (default: 1.0)."
         ),
     )
+    parser.add_argument(
+        "--fn-penalty",
+        type=float,
+        default=1.0,
+        help=(
+            "Extra BCE weight on errors for true on-path cells (target=0), on "
+            "top of --pos-weight's class-balance correction (default: 1.0 = "
+            "no change). Motivated by the label-noise sweep showing false "
+            "negatives on real CBS-path cells collapse LaCAM's search far more "
+            "than false positives on neighboring off-path cells — values > 1 "
+            "penalize that specific error type harder."
+        ),
+    )
 
     # ── MAPF instance (required for lacam_only; optional eval for supervised_delay) ──
     parser.add_argument(

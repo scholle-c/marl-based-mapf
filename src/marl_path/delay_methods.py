@@ -16,6 +16,7 @@ from __future__ import annotations
 import heapq
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Callable
 
 import numpy as np
 
@@ -362,7 +363,237 @@ class RandomDelay(DelayMethod):
         return delay_map
 
 
+class SpaceTimeDelay(DelayMethod):
+    """Delay = true cost-to-go with the other agents treated as *moving* obstacles.
+
+    Unlike the path-marking methods, this fills every cell with a physically
+    meaningful value: "if I were on cell v (at planning time), following the
+    optimal single-agent route while every *other* agent walks its fixed CBS
+    path, how many steps do I still need?" — minus the plain BFS distance.
+
+        delay(v) = d(v, t0) - h_bfs(v)
+
+    d(v, t) is computed by a backward dynamic program over the time-expanded
+    grid (state = (cell, time)):
+
+        d(g, t)  = 0
+        d(v, t)  = 1 + min_{u in neighbours(v) + {v}} d(u, t+1)
+
+    subject to, for the move v -> u at step t -> t+1:
+        * vertex:  u is not occupied by another agent at t+1
+        * swap:    no other agent traverses the edge u -> v at t -> t+1
+
+    Other agents follow paths[j]; once their path ends they stay parked on
+    their final cell (a permanent obstacle). The world becomes static after
+    T = max_j (len(path_j) - 1), so the top layer d(., T) is a plain backward
+    BFS from the goal with the parked cells blocked, and layers T-1 .. 0 are
+    swept in one pass each (each layer depends only on layer t+1).
+
+    Collapse to the 2D map required by the heuristic:
+        * "t0"  (default): d(v, 0) — cost-to-go if you were at v *now*. Cells
+                 blocked at t=0 (or unreachable) fall back to delay 0.
+        * "min": min_t d(v, t) — best-case cost-to-go over all times. Ignores
+                 the "occupied right now" artefact; keeps only structural /
+                 persistent congestion. Useful as an ablation.
+
+    Congestion model:
+        * park_blocks=False (default, "transient"): an agent is an obstacle only
+                 while it is still moving along its path; once it reaches its
+                 goal it is ignored and the map beyond the horizon is assumed
+                 clear (top layer = plain BFS). Delay then measures *only* the
+                 waiting/detour forced by crossing traffic — small and sparse.
+        * park_blocks=True ("permanent"): every other agent also blocks its goal
+                 cell forever (top layer = BFS with parked cells removed). Far
+                 more pessimistic; as a *static* heuristic it tends to swamp the
+                 BFS term on dense maps. Kept for ablation.
+
+    Args:
+        collapse:    "t0" or "min" (default "t0").
+        park_blocks: model parked agents as permanent obstacles (default False).
+    """
+
+    def __init__(self, collapse: str = "t0", park_blocks: bool = False):
+        if collapse not in ("t0", "min"):
+            raise ValueError(f"collapse must be 't0' or 'min', got {collapse!r}")
+        self.collapse = collapse
+        self.park_blocks = park_blocks
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:
+        delay_map = np.zeros(grid.shape, dtype=np.float32)
+        if not paths[agent_idx]:
+            return delay_map
+
+        goal = goals[agent_idx]
+        others = [j for j in range(len(paths)) if j != agent_idx and paths[j]]
+
+        def pos(j: int, t: int) -> Coord | None:
+            """Cell of agent j at time t. None once it has parked (transient mode)."""
+            p = paths[j]
+            if t < len(p):
+                return p[t]
+            return p[-1] if self.park_blocks else None
+
+        # Horizon after which every other agent has finished its path.
+        T = max((len(paths[j]) - 1 for j in others), default=0)
+
+        # Per-timestep occupancy and traversed edges of the other agents.
+        occ: list[set[Coord]] = [
+            {c for j in others if (c := pos(j, t)) is not None} for t in range(T + 1)
+        ]
+        edges: list[set[tuple[Coord, Coord]]] = [
+            {
+                (a, b)
+                for j in others
+                if (a := pos(j, t)) is not None and (b := pos(j, t + 1)) is not None
+            }
+            for t in range(T)
+        ]
+
+        # Top layer d(., T): cost-to-go once the horizon is over.
+        if self.park_blocks:
+            d_next = _static_cost_to_go(grid, goal, occ[T] - {goal})
+        else:
+            # Map assumed clear beyond the horizon → plain BFS distance.
+            d_next = np.where(bfs_cache[goal] < bfs_cache.NIL, bfs_cache[goal], np.inf)
+            d_next = d_next.astype(np.float32)
+        d_min = d_next.copy()
+
+        free_cells = [
+            (y, x)
+            for y in range(grid.shape[0])
+            for x in range(grid.shape[1])
+            if grid[y, x]
+        ]
+
+        # Backward sweep: layer t depends only on layer t+1.
+        for t in range(T - 1, -1, -1):
+            occ_t = occ[t]
+            occ_t1 = occ[t + 1]
+            edges_t = edges[t]
+            d_cur = np.full(grid.shape, np.inf, dtype=np.float32)
+            for v in free_cells:
+                if v in occ_t:  # cannot stand here at time t
+                    continue
+                if v == goal:
+                    d_cur[v] = 0.0
+                    continue
+                best = np.inf
+                for u in get_neighbors(grid, v) + [v]:  # moves + wait
+                    if u in occ_t1:  # vertex collision at t+1
+                        continue
+                    if (u, v) in edges_t:  # head-on swap
+                        continue
+                    cand = 1.0 + d_next[u]
+                    if cand < best:
+                        best = cand
+                d_cur[v] = best
+            d_next = d_cur
+            np.minimum(d_min, d_cur, out=d_min)
+
+        d_final = d_next if self.collapse == "t0" else d_min
+
+        bfs_table = bfs_cache[goal]
+        cap = float(grid.size)
+        for v in free_cells:
+            d = d_final[v]
+            h = bfs_table[v]
+            if not np.isfinite(d) or h >= bfs_cache.NIL:
+                continue  # blocked/unreachable → trust plain BFS (delay 0)
+            delay_map[v] = min(cap, max(0.0, float(d - h)))
+
+        return delay_map
+
+
+class CbsFunnelDelay(DelayMethod):
+    """Dense, smooth funnel that channels an agent onto its CBS path.
+
+    This is the *guidance* counterpart to the cost-to-go methods: instead of
+    estimating true remaining cost (which rewards selfish deviation from the
+    coordinated plan), it simply makes every cell more expensive the further it
+    lies from the agent's CBS path, so a greedy descent slides back onto it.
+
+        funnel(v) = geodesic hop-distance from v to the nearest CBS-path cell
+
+    On the path funnel = 0; it grows by 1 per step away, obstacles routed
+    around (true graph distance, multi-source BFS). Added on top of BFS this
+    gives h_total(v) = dist_to_goal(v) + dist_to_path(v): the agent is pulled
+    toward the goal *and* toward the coordinated corridor.
+
+    This is the intended learning target (a model predicts it from map + agent
+    endpoints, without ever running CBS at inference). It is a denser, smoother
+    version of the binary NonOptimalPenaltyDelay: every cell is supervised, and
+    because a funnel is robust to which of several equally-optimal CBS paths was
+    picked (averaging two funnels ≈ a valid, slightly wider funnel — unlike
+    averaging two binary paths, which blurs into a broken path), it carries far
+    less tie-break label noise than the binary target.
+
+    Args:
+        tau:       If set, saturate via 1 - exp(-d/tau) → bounded in [0, 1),
+                   smoother far field. If None (default), raw linear hops —
+                   directly injectable into LaCAM (same scale as BFS steps).
+        normalize: Divide by the per-map max so the target lives in [0, 1].
+                   Convenient for NN regression; do NOT combine with LaCAM
+                   injection (kills the scale relative to h_bfs).
+    """
+
+    def __init__(self, tau: float | None = None, normalize: bool = False):
+        self.tau = tau
+        self.normalize = normalize
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:  # noqa: ARG002
+        path = paths[agent_idx]
+        if not path:
+            return np.zeros(grid.shape, dtype=np.float32)
+
+        # Multi-source BFS: hop-distance from every free cell to the CBS path.
+        dist = np.full(grid.shape, np.inf, dtype=np.float32)
+        Q: deque = deque()
+        for c in path:
+            if dist[c] != 0.0:
+                dist[c] = 0.0
+                Q.append(c)
+        while Q:
+            u = Q.popleft()
+            d = dist[u]
+            for v in get_neighbors(grid, u):
+                if d + 1 < dist[v]:
+                    dist[v] = d + 1
+                    Q.append(v)
+
+        funnel = dist
+        funnel[~np.isfinite(funnel)] = 0.0  # disconnected → no guidance
+        if self.tau is not None:
+            funnel = (1.0 - np.exp(-funnel / self.tau)).astype(np.float32)
+        if self.normalize:
+            m = float(funnel.max())
+            if m > 0.0:
+                funnel = funnel / m
+        funnel[~grid] = 0.0
+        return funnel.astype(np.float32)
+
+
 # ── Shared helper ─────────────────────────────────────────────────────────────
+
+
+def _static_cost_to_go(grid: Grid, goal: Coord, blocked: set[Coord]) -> np.ndarray:
+    """Backward BFS from `goal`, treating `blocked` cells as extra obstacles.
+
+    Returns a float map of steps-to-goal; unreachable cells are +inf. The goal
+    itself is always reachable (0), even if another agent is parked on it.
+    """
+    table = np.full(grid.shape, np.inf, dtype=np.float32)
+    table[goal] = 0.0
+    Q: deque = deque([goal])
+    while Q:
+        u = Q.popleft()
+        d = table[u]
+        for v in get_neighbors(grid, u):
+            if v in blocked:
+                continue
+            if d + 1 < table[v]:
+                table[v] = d + 1
+                Q.append(v)
+    return table
 
 
 def _diffuse(
@@ -406,7 +637,7 @@ def _diffuse(
 # ── Registry ──────────────────────────────────────────────────────────────────
 # Add new methods here and they become available via --delay-method.
 
-DELAY_METHODS: dict[str, type[DelayMethod]] = {
+DELAY_METHODS: dict[str, Callable[[], DelayMethod]] = {
     "zero": ZeroDelay,
     "first_visit": FirstVisitDelay,
     "diffused_first_visit": DiffusedFirstVisitDelay,
@@ -420,6 +651,10 @@ DELAY_METHODS: dict[str, type[DelayMethod]] = {
     "non_optimal_penalty": NonOptimalPenaltyDelay,
     "non_optimal_penalty_bfs": NonOptimalPenaltyBFSDelay,
     "non_astar_penalty": NonAStarPenaltyDelay,
+    "space_time": SpaceTimeDelay,  # transient congestion, t0 collapse (default)
+    "space_time_parked": lambda: SpaceTimeDelay(park_blocks=True),
+    "cbs_funnel": CbsFunnelDelay,  # dense guidance funnel (learning target)
+    "cbs_funnel_sat": lambda: CbsFunnelDelay(tau=3.0),
 }
 
 

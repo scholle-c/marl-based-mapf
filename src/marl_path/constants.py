@@ -28,6 +28,7 @@ COMPARISON_ALGO_IMITATION_MODEL: str = "imitation_model"
 
 # Pipeline modes
 PIPELINE_MODE_SUPERVISED_DELAY: str = "supervised_delay"
+PIPELINE_MODE_SUPERVISED_DELAY_REGRESSION: str = "supervised_delay_regression"
 PIPELINE_MODE_LACAM_ONLY: str = "lacam_only"
 PIPELINE_MODE_EVAL_ONLY: str = "eval_only"
 

@@ -25,6 +25,7 @@ def save_checkpoint(
     model: DefaultModel, extractor: FeatureExtractor, path: str
 ) -> None:
     """Save model weights, extractor config, and model architecture together."""
+    out_activation = getattr(model, "_out_activation", "sigmoid")
     if isinstance(model, PatchTransformer):
         model_config = {
             "arch": "vit",
@@ -35,6 +36,7 @@ def save_checkpoint(
             "vit_embed_dim": model._embed_dim,
             "vit_layers": model._num_layers,
             "vit_heads": model._num_heads,
+            "out_activation": out_activation,
         }
     else:
         model_config = {
@@ -42,6 +44,7 @@ def save_checkpoint(
             "in_channels": extractor.n_channels,
             "hidden_channels": getattr(model, "_hidden_channels", None),
             "depth": getattr(model, "_depth", None),
+            "out_activation": out_activation,
         }
     torch.save(
         {
@@ -82,6 +85,7 @@ def load_model(
         model_config = {}
         arch = "cnn"
 
+    out_activation = model_config.get("out_activation", "sigmoid")
     if arch == "vit":
         model = PatchTransformer(
             in_channels=in_channels,
@@ -91,12 +95,14 @@ def load_model(
             embed_dim=model_config.get("vit_embed_dim") or 64,
             num_layers=model_config.get("vit_layers") or 4,
             num_heads=model_config.get("vit_heads") or 4,
+            out_activation=out_activation,
         ).to(device)
     else:
         model = DistanceTableCNN(
             in_channels=in_channels,
             hidden_channels=model_config.get("hidden_channels") or 32,
             depth=model_config.get("depth") or 4,
+            out_activation=out_activation,
         ).to(device)
     model.load_state_dict(state_dict)
     model.eval()

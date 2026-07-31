@@ -119,6 +119,114 @@ def eval_dense_delay_loss(
     return total_loss / n if n else float("nan")
 
 
+# ── Regression (continuous target, e.g. dense CBS funnel) ─────────────────────
+
+
+def _batch_delay_values(model: Any, input_tensors: List[torch.Tensor]) -> torch.Tensor:
+    """Single batched forward pass returning activated per-cell values.
+
+    Uses model.forward (softplus head for regression models), so training and
+    LaCAM inference apply the exact same output transform.
+    """
+    batched = torch.cat(input_tensors, dim=0)  # (num_agents, C, H, W)
+    return model(batched).squeeze(1)  # (num_agents, H, W)
+
+
+def _regression_loss(
+    pred: torch.Tensor, target: torch.Tensor, loss_type: str
+) -> torch.Tensor:
+    if loss_type == "mse":
+        return torch.nn.functional.mse_loss(pred, target)
+    if loss_type == "huber":
+        return torch.nn.functional.smooth_l1_loss(pred, target)
+    raise ValueError(f"Unknown loss_type {loss_type!r}; choose 'mse' or 'huber'")
+
+
+def update_dense_delay_regression_from_batch(
+    model: Any,
+    optimizer: Any,
+    batch: Sequence[DenseDelayBatchItem],
+    loss_type: str = "mse",
+) -> float:
+    """Regression loss over every free cell of the grid, for every agent.
+
+    Counterpart of update_dense_delay_from_batch for continuous targets: no
+    sigmoid, no class weighting — just MSE/Huber between the softplus output
+    and the dense target (e.g. hop-distance CBS funnel)."""
+    if not batch:
+        return float("nan")
+    model.train()
+    optimizer.zero_grad()
+    total_loss = 0.0
+    for item in batch:
+        preds = _batch_delay_values(model, item.input_tensors)
+        mask = item.free_mask.unsqueeze(0).expand_as(preds)
+        loss = _regression_loss(preds[mask], item.targets[mask], loss_type)
+        loss.backward()
+        total_loss += loss.item()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    optimizer.step()
+    return total_loss / len(batch)
+
+
+def eval_dense_delay_regression_loss(
+    model: Any,
+    batch: Iterable[DenseDelayBatchItem],
+    loss_type: str = "mse",
+) -> float:
+    """Mean regression loss over free cells without updating weights."""
+    model.eval()
+    total_loss = 0.0
+    n = 0
+    with torch.no_grad():
+        for item in batch:
+            preds = _batch_delay_values(model, item.input_tensors)
+            mask = item.free_mask.unsqueeze(0).expand_as(preds)
+            total_loss += _regression_loss(
+                preds[mask], item.targets[mask], loss_type
+            ).item()
+            n += 1
+    return total_loss / n if n else float("nan")
+
+
+def compute_regression_metrics(
+    model: Any, batch: Iterable[DenseDelayBatchItem]
+) -> tuple[float, float]:
+    """(MAE, RMSE) over free cells, averaged per item — interpretable in the
+    target's own units (hops), unlike the raw MSE."""
+    model.eval()
+    mae_sum = 0.0
+    mse_sum = 0.0
+    n = 0
+    with torch.no_grad():
+        for item in batch:
+            preds = _batch_delay_values(model, item.input_tensors)
+            mask = item.free_mask.unsqueeze(0).expand_as(preds)
+            diff = preds[mask] - item.targets[mask]
+            mae_sum += diff.abs().mean().item()
+            mse_sum += (diff**2).mean().item()
+            n += 1
+    if not n:
+        return float("nan"), float("nan")
+    return mae_sum / n, (mse_sum / n) ** 0.5
+
+
+def trivial_baseline_regression_loss(
+    batch: Iterable[DenseDelayBatchItem], loss_type: str = "mse"
+) -> float:
+    """Loss of the constant per-item mean predictor — the variance floor that a
+    trained regressor must beat to have learned any spatial structure."""
+    total_loss = 0.0
+    n = 0
+    for item in batch:
+        mask = item.free_mask.unsqueeze(0).expand_as(item.targets)
+        target = item.targets[mask]
+        pred = torch.full_like(target, float(target.mean()))
+        total_loss += _regression_loss(pred, target, loss_type).item()
+        n += 1
+    return total_loss / n if n else float("nan")
+
+
 def trivial_baseline_dense_loss(
     batch: Iterable[DenseDelayBatchItem],
     pos_weight: float = 0.05,

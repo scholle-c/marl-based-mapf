@@ -42,11 +42,13 @@ def main():
         default=consts.PIPELINE_MODE_SUPERVISED_DELAY,
         choices=[
             consts.PIPELINE_MODE_SUPERVISED_DELAY,
+            consts.PIPELINE_MODE_SUPERVISED_DELAY_REGRESSION,
             consts.PIPELINE_MODE_LACAM_ONLY,
             consts.PIPELINE_MODE_EVAL_ONLY,
         ],
         help=(
-            f"'{consts.PIPELINE_MODE_SUPERVISED_DELAY}': train model on CBS-optimal dataset. "
+            f"'{consts.PIPELINE_MODE_SUPERVISED_DELAY}': train model on CBS-optimal dataset (binary segmentation). "
+            f"'{consts.PIPELINE_MODE_SUPERVISED_DELAY_REGRESSION}': same, but regress a continuous delay target (e.g. cbs_funnel). "
             f"'{consts.PIPELINE_MODE_LACAM_ONLY}': run LaCAM baseline only. "
             f"'{consts.PIPELINE_MODE_EVAL_ONLY}': evaluate vanilla LaCAM baseline vs. "
             "CBS-optimal on --dataset-dir/test, capped by --eval-limit. "

@@ -362,6 +362,68 @@ class RandomDelay(DelayMethod):
         return delay_map
 
 
+class CbsFunnelDelay(DelayMethod):
+    """Dense, smooth funnel that channels an agent onto its CBS path.
+
+    Guidance counterpart to cost-to-go methods: instead of estimating true
+    remaining cost (which rewards selfish deviation from the coordinated plan),
+    it makes every cell more expensive the further it lies from the agent's CBS
+    path, so greedy descent slides back onto it.
+
+        funnel(v) = geodesic hop-distance from v to the nearest CBS-path cell
+
+    On the path funnel = 0; grows by 1 per step away, obstacles routed around
+    (multi-source BFS). Added on top of BFS this gives
+    h_total(v) = dist_to_goal(v) + dist_to_path(v).
+
+    Intended as a *regression* learning target: dense (every cell supervised),
+    smooth, and robust to which of several equally-optimal CBS paths was picked
+    (averaging two funnels ≈ a valid, wider funnel — far less tie-break noise
+    than a binary path target).
+
+    Args:
+        tau:       If set, saturate via 1 - exp(-d/tau) → bounded in [0, 1).
+                   If None (default), raw linear hops (same scale as BFS steps,
+                   directly injectable into LaCAM).
+        normalize: Divide by the per-map max → target in [0, 1] (NN convenience;
+                   do not combine with LaCAM injection — kills the h_bfs scale).
+    """
+
+    def __init__(self, tau: float | None = None, normalize: bool = False):
+        self.tau = tau
+        self.normalize = normalize
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:  # noqa: ARG002
+        path = paths[agent_idx]
+        if not path:
+            return np.zeros(grid.shape, dtype=np.float32)
+
+        dist = np.full(grid.shape, np.inf, dtype=np.float32)
+        Q: deque = deque()
+        for c in path:
+            if dist[c] != 0.0:
+                dist[c] = 0.0
+                Q.append(c)
+        while Q:
+            u = Q.popleft()
+            d = dist[u]
+            for v in get_neighbors(grid, u):
+                if d + 1 < dist[v]:
+                    dist[v] = d + 1
+                    Q.append(v)
+
+        funnel = dist
+        funnel[~np.isfinite(funnel)] = 0.0  # disconnected → no guidance
+        if self.tau is not None:
+            funnel = (1.0 - np.exp(-funnel / self.tau)).astype(np.float32)
+        if self.normalize:
+            m = float(funnel.max())
+            if m > 0.0:
+                funnel = funnel / m
+        funnel[~grid] = 0.0
+        return funnel.astype(np.float32)
+
+
 # ── Shared helper ─────────────────────────────────────────────────────────────
 
 
@@ -420,6 +482,7 @@ DELAY_METHODS: dict[str, type[DelayMethod]] = {
     "non_optimal_penalty": NonOptimalPenaltyDelay,
     "non_optimal_penalty_bfs": NonOptimalPenaltyBFSDelay,
     "non_astar_penalty": NonAStarPenaltyDelay,
+    "cbs_funnel": CbsFunnelDelay,
 }
 
 

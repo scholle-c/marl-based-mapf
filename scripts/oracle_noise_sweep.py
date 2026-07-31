@@ -35,13 +35,13 @@ from loguru import logger
 
 from marl_path.delay_methods import get_delay_method
 from marl_path.dataset.instance import CachedInstance
-from marl_path.model import get_soc
+from marl_path.model import DefaultModel, get_soc
 from marl_path.pipelines.lacam_eval import _cbs_soc_from_cached_paths, resolve_test_dir
 from marl_path.pycam import LaCAM
 from marl_path.shared.mapf_utils import BfsCache, Config, get_grid, get_scenario
 
 
-class OracleDelayModel:
+class OracleDelayModel(DefaultModel):
     """Fake 'model' returning precomputed (optionally noised) delay maps.
 
     DistTable builds one of these per agent inside `enumerate(goals)`, in
@@ -51,9 +51,11 @@ class OracleDelayModel:
     """
 
     def __init__(self, delay_maps: list[np.ndarray]):
+        super().__init__()
         self._queue: deque[np.ndarray] = deque(delay_maps)
 
-    def __call__(self, _input_tensor: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        del x
         return torch.from_numpy(self._queue.popleft()).unsqueeze(0).unsqueeze(0)
 
 
@@ -182,8 +184,12 @@ def run_sweep(
                     baseline_socs_all.append(b)
             cbs_socs_all.append(entry["cbs_soc"])
 
-        baseline_mean = float(np.mean(baseline_socs_all)) if baseline_socs_all else float("nan")
-        oracle_mean = float(np.mean(oracle_socs_all)) if oracle_socs_all else float("nan")
+        baseline_mean = (
+            float(np.mean(baseline_socs_all)) if baseline_socs_all else float("nan")
+        )
+        oracle_mean = (
+            float(np.mean(oracle_socs_all)) if oracle_socs_all else float("nan")
+        )
         cbs_mean = float(np.mean(cbs_socs_all)) if cbs_socs_all else float("nan")
         denom = baseline_mean - cbs_mean
         gap_closed = (

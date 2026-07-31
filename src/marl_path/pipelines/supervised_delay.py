@@ -258,6 +258,7 @@ class SupervisedDelayPipeline(DefaultTrainingPipeline):
             seed=eval_seed,
             penalty_scale=penalty_scale,
             num_seeds=getattr(self.args, "eval_seeds", 1) or 1,
+            limit=getattr(self.args, "eval_limit", None),
         )
         assert eval_summary.model is not None  # model= was passed, so always set
         return eval_summary.model.mean, eval_summary

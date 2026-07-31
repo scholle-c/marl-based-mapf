@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from abc import ABC, abstractmethod
+
+_OUT_ACTIVATIONS = ("sigmoid", "softplus")
+
+
+def _apply_out_activation(logits: torch.Tensor, activation: str) -> torch.Tensor:
+    """Map pre-activation logits to the model output.
+
+    "sigmoid"  -> [0, 1], for binary-segmentation (BCE) targets.
+    "softplus" -> [0, inf), for non-negative regression targets (e.g. the
+                   dense CBS funnel, whose values are hop distances >= 0).
+    """
+    if activation == "sigmoid":
+        return torch.sigmoid(logits)
+    if activation == "softplus":
+        return F.softplus(logits)
+    raise ValueError(
+        f"Unknown out_activation {activation!r}; choose from {_OUT_ACTIVATIONS}"
+    )
 
 
 class DefaultModel(nn.Module, ABC):
@@ -28,10 +47,12 @@ class DistanceTableCNN(DefaultModel):
         in_channels: int = 5,
         hidden_channels: int = 32,
         depth: int = 4,
+        out_activation: str = "sigmoid",
     ):
         super().__init__()
         self._hidden_channels = hidden_channels
         self._depth = depth
+        self._out_activation = out_activation
         layers: list[nn.Module] = []
         channels = in_channels
         for _ in range(depth - 1):
@@ -57,8 +78,8 @@ class DistanceTableCNN(DefaultModel):
         return self.network(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass: (batch, C, H, W) -> (batch, 1, H, W) in [0, 1]."""
-        return torch.sigmoid(self.forward_logits(x))
+        """Forward pass: (batch, C, H, W) -> (batch, 1, H, W), activated head."""
+        return _apply_out_activation(self.forward_logits(x), self._out_activation)
 
 
 class PatchTransformer(DefaultModel):
@@ -93,8 +114,10 @@ class PatchTransformer(DefaultModel):
         num_heads: int = 4,
         mlp_dim: int | None = None,
         dropout: float = 0.0,
+        out_activation: str = "sigmoid",
     ):
         super().__init__()
+        self._out_activation = out_activation
         if grid_height % patch_size != 0 or grid_width % patch_size != 0:
             raise ValueError(
                 f"grid size ({grid_height}x{grid_width}) must be divisible "
@@ -142,5 +165,5 @@ class PatchTransformer(DefaultModel):
         return out
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass: (batch, C, H, W) -> (batch, 1, H, W) in [0, 1]."""
-        return torch.sigmoid(self.forward_logits(x))
+        """Forward pass: (batch, C, H, W) -> (batch, 1, H, W), activated head."""
+        return _apply_out_activation(self.forward_logits(x), self._out_activation)

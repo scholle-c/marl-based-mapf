@@ -145,10 +145,16 @@ def run_comparison(
                 "gap_closed_binarized": bin_summary.gap_closed,
                 "gap_closed_zero_floor": floor_summary.gap_closed,
                 "gap_closed_binarized_at_floor_threshold": bin_08_summary.gap_closed,
-                "soc_continuous": cont_summary.model.mean if cont_summary.model else None,
+                "soc_continuous": cont_summary.model.mean
+                if cont_summary.model
+                else None,
                 "soc_binarized": bin_summary.model.mean if bin_summary.model else None,
-                "soc_zero_floor": floor_summary.model.mean if floor_summary.model else None,
-                "soc_binarized_at_floor_threshold": bin_08_summary.model.mean if bin_08_summary.model else None,
+                "soc_zero_floor": floor_summary.model.mean
+                if floor_summary.model
+                else None,
+                "soc_binarized_at_floor_threshold": bin_08_summary.model.mean
+                if bin_08_summary.model
+                else None,
                 "soc_baseline": cont_summary.baseline.mean,
                 "soc_cbs": cont_summary.cbs_mean,
             }
@@ -156,12 +162,20 @@ def run_comparison(
         logger.info(
             "epoch={:<4} gap_closed continuous={}  binarized@0.5={}  zero_floor@{}={}  binarized@{}={}",
             epoch,
-            f"{100 * cont_summary.gap_closed:.1f}%" if cont_summary.gap_closed is not None else "n/a",
-            f"{100 * bin_summary.gap_closed:.1f}%" if bin_summary.gap_closed is not None else "n/a",
+            f"{100 * cont_summary.gap_closed:.1f}%"
+            if cont_summary.gap_closed is not None
+            else "n/a",
+            f"{100 * bin_summary.gap_closed:.1f}%"
+            if bin_summary.gap_closed is not None
+            else "n/a",
             zero_floor_threshold,
-            f"{100 * floor_summary.gap_closed:.1f}%" if floor_summary.gap_closed is not None else "n/a",
+            f"{100 * floor_summary.gap_closed:.1f}%"
+            if floor_summary.gap_closed is not None
+            else "n/a",
             zero_floor_threshold,
-            f"{100 * bin_08_summary.gap_closed:.1f}%" if bin_08_summary.gap_closed is not None else "n/a",
+            f"{100 * bin_08_summary.gap_closed:.1f}%"
+            if bin_08_summary.gap_closed is not None
+            else "n/a",
         )
     return rows
 

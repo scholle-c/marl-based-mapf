@@ -81,6 +81,15 @@ class DefaultTrainingPipeline(DefaultPipeline):
     def __init__(self, args: argparse.Namespace):
         super().__init__(args)
         self.device: torch.device = _get_device(self.args.device)
+        # Regression pipelines predict non-negative continuous targets (e.g. the
+        # dense CBS funnel) → softplus head; the binary-segmentation pipeline
+        # keeps the sigmoid head.
+        out_activation = (
+            "softplus"
+            if self.args.pipeline_mode
+            == consts.PIPELINE_MODE_SUPERVISED_DELAY_REGRESSION
+            else "sigmoid"
+        )
         self.model, self.extractor = _initialize_model(
             self.args.model_file,
             self.device,
@@ -95,6 +104,7 @@ class DefaultTrainingPipeline(DefaultPipeline):
             vit_embed_dim=getattr(self.args, "vit_embed_dim", 64),
             vit_layers=getattr(self.args, "vit_layers", 4),
             vit_heads=getattr(self.args, "vit_heads", 4),
+            out_activation=out_activation,
         )
         self.training_stats = TrainingStats(
             training_mode=self.args.pipeline_mode,
@@ -168,6 +178,7 @@ def _initialize_model(
     vit_embed_dim: int = 64,
     vit_layers: int = 4,
     vit_heads: int = 4,
+    out_activation: str = "sigmoid",
 ) -> tuple[DefaultModel, FeatureExtractor]:
     if path is not None:
         return load_model(path, device=device)
@@ -219,12 +230,14 @@ def _initialize_model(
             embed_dim=vit_embed_dim,
             num_layers=vit_layers,
             num_heads=vit_heads,
+            out_activation=out_activation,
         ).to(device)
     else:
         model = DistanceTableCNN(
             in_channels=extractor.n_channels,
             hidden_channels=hidden_channels,
             depth=depth,
+            out_activation=out_activation,
         ).to(device)
     if model_initialization_mode == 1:
         logger.info("applying pretraining on default values...")

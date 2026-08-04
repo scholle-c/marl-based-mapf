@@ -692,7 +692,7 @@ DELAY_METHODS: dict[str, Callable[[], DelayMethod]] = {
     "random": RandomDelay,
     "non_optimal_penalty": NonOptimalPenaltyDelay,
     "non_optimal_big_penalty": NonOptimalBigPenaltyDelay,
-    "cbs_funnel": NonOptimalPenaltyBFSDelay,
+    "non_optimal_penalty_bfs": NonOptimalPenaltyBFSDelay,
     "non_astar_penalty": NonAStarPenaltyDelay,
     "space_time": SpaceTimeDelay,  # transient congestion, t0 collapse (default)
     "space_time_parked": lambda: SpaceTimeDelay(park_blocks=True),

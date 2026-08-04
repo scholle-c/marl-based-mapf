@@ -694,14 +694,11 @@ DELAY_METHODS: dict[str, Callable[[], DelayMethod]] = {
     "non_optimal_big_penalty": NonOptimalBigPenaltyDelay,
     "cbs_funnel": NonOptimalPenaltyBFSDelay,
     "non_astar_penalty": NonAStarPenaltyDelay,
-<<<<<<< HEAD
     "space_time": SpaceTimeDelay,  # transient congestion, t0 collapse (default)
     "space_time_parked": lambda: SpaceTimeDelay(park_blocks=True),
     "cbs_funnel": CbsFunnelDelay,  # dense guidance funnel (learning target)
     "cbs_funnel_sat": lambda: CbsFunnelDelay(tau=3.0),
-=======
     "cbs_path": CBSPath,
->>>>>>> e8ad0b9 (feat: added a time-considering cbs path heuristic, that performed better than the 2d table one in tests)
 }
 
 

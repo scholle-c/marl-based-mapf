@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 from marl_path.delay_methods import DELAY_METHODS, get_delay_method
+from marl_path.path_noise import PATH_NOISE_OPS
 from marl_path.pipeline import run_evaluation
 from marl_path.shared.config import load_config
 
@@ -58,6 +59,46 @@ def main():
         type=Path,
         default=None,
         help="Optional directory to write results JSON.",
+    )
+    parser.add_argument(
+        "--cbs-path-penalty",
+        type=float,
+        default=100000.0,
+        help="Penalty added for cells off the time-indexed CBS path "
+        "(--delay-method cbs_path). Large = hard constraint, small = hint.",
+    )
+    parser.add_argument(
+        "--path-noise",
+        type=str,
+        default="none",
+        choices=list(PATH_NOISE_OPS),
+        help="Structure-preserving noise applied to the CBS paths before the "
+        "heuristic is built. Never affects soc_cbs.",
+    )
+    parser.add_argument(
+        "--path-noise-level",
+        type=float,
+        default=0.0,
+        help="Fraction of agents perturbed (0.0-1.0).",
+    )
+    parser.add_argument(
+        "--path-noise-ops",
+        type=int,
+        default=1,
+        help="Perturbations applied per affected agent.",
+    )
+    parser.add_argument(
+        "--path-noise-p",
+        type=float,
+        default=0.05,
+        help="Per-step error probability for --path-noise action (Operator C).",
+    )
+    parser.add_argument(
+        "--path-noise-seed",
+        type=int,
+        default=0,
+        help="RNG seed for noise. Which agents are hit matters a lot — vary "
+        "this and report the spread.",
     )
 
     first_pass, _ = parser.parse_known_args()

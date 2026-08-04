@@ -93,6 +93,21 @@ class NonOptimalPenaltyDelay(DelayMethod):
         return delay_map
 
 
+class NonOptimalBigPenaltyDelay(DelayMethod):
+    """See NonOptimalPenaltyDelay, but with a bigger penalty (e.g. +100000) for each cell that isnt on the optimal path of the agent."""
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:
+        path = paths[agent_idx]
+        delay_map = np.ones(grid.shape, dtype=np.float32) * 100000
+        if not path:
+            return delay_map
+
+        for coord in path:
+            delay_map[coord] = 0.0  # No penalty for cells on the optimal path
+
+        return delay_map
+
+
 class NonOptimalPenaltyBFSDelay(DelayMethod):
     """Delay = Penalty (e.g. x + 0 if on optimal path, x = min(neigh(x)) + 1 otherwise) for each cell that isnt on the optimal path of the agent.
 
@@ -153,6 +168,33 @@ class NonAStarPenaltyDelay(DelayMethod):
             delay_map[coord] = 0.0  # No penalty for cells on the A* path
 
         return delay_map
+
+
+class CBSPath(DelayMethod):
+    """Signal = calculated on the fly using the CBS path: The Get method returns the distance to goal + a signal towards the CBS path.
+    Whats new is, that this method considers time --> Waiting and revisiting of cells is considered in heuristic/Guiding.
+
+    Right now this method is extreme in punishing the agent for not being on the CBS path (+100000) to see, if this can close the gap completly
+    """
+
+    def compute(self, grid, bfs_cache, paths, goals, agent_idx) -> np.ndarray:
+        # paths is a nested list: outer dim = agents, inner dim = coordinates
+        # visited over time. Pad it into a dense (n_agents, max_len, 2) array,
+        # filling shorter paths with each agent's last coordinate so all agents
+        # share the same time dimension.
+        if not paths:
+            return np.zeros((0, 0, 2), dtype=np.int32)
+
+        max_len = max(len(path) for path in paths)
+        padded = np.zeros((len(paths), max_len, 2), dtype=np.int32)
+        for i, path in enumerate(paths):
+            if not path:
+                continue
+            padded[i, : len(path)] = path
+            if len(path) < max_len:
+                padded[i, len(path) :] = path[-1]
+
+        return padded[agent_idx]
 
 
 class DiffusedFirstVisitDelay(DelayMethod):
@@ -649,12 +691,17 @@ DELAY_METHODS: dict[str, Callable[[], DelayMethod]] = {
     "topological": TopologicalDelay,
     "random": RandomDelay,
     "non_optimal_penalty": NonOptimalPenaltyDelay,
-    "non_optimal_penalty_bfs": NonOptimalPenaltyBFSDelay,
+    "non_optimal_big_penalty": NonOptimalBigPenaltyDelay,
+    "cbs_funnel": NonOptimalPenaltyBFSDelay,
     "non_astar_penalty": NonAStarPenaltyDelay,
+<<<<<<< HEAD
     "space_time": SpaceTimeDelay,  # transient congestion, t0 collapse (default)
     "space_time_parked": lambda: SpaceTimeDelay(park_blocks=True),
     "cbs_funnel": CbsFunnelDelay,  # dense guidance funnel (learning target)
     "cbs_funnel_sat": lambda: CbsFunnelDelay(tau=3.0),
+=======
+    "cbs_path": CBSPath,
+>>>>>>> e8ad0b9 (feat: added a time-considering cbs path heuristic, that performed better than the 2d table one in tests)
 }
 
 

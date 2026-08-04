@@ -25,13 +25,13 @@ class PIBT:
         # used for tie-breaking
         self.rng = np.random.default_rng(seed)
 
-    def funcPIBT(self, Q_from: Config, Q_to: Config, i: int) -> bool:
+    def funcPIBT(self, Q_from: Config, Q_to: Config, i: int, timestep: int) -> bool:
         # true -> valid, false -> invalid
 
         # get candidate next vertices
         C = [Q_from[i]] + get_neighbors(self.grid, Q_from[i])
         self.rng.shuffle(C)  # tie-breaking, randomize
-        C = sorted(C, key=lambda u: self.dist_tables[i].get(u))
+        C = sorted(C, key=lambda u: self.dist_tables[i].get(u, timestep))  # sort by distance to goal
 
         # vertex assignment
         for v in C:
@@ -53,7 +53,7 @@ class PIBT:
             if (
                 j != self.NIL
                 and (Q_to[j] == self.NIL_COORD)
-                and (not self.funcPIBT(Q_from, Q_to, j))
+                and (not self.funcPIBT(Q_from, Q_to, j, timestep))
             ):
                 continue
 
@@ -69,6 +69,7 @@ class PIBT:
         Q_from: Config,
         Q_to: Config,
         order: list[int],
+        timestep: int,
     ) -> bool:
         flg_success = True
 
@@ -91,7 +92,7 @@ class PIBT:
         if flg_success:
             for i in order:
                 if Q_to[i] == self.NIL_COORD:
-                    flg_success = self.funcPIBT(Q_from, Q_to, i)
+                    flg_success = self.funcPIBT(Q_from, Q_to, i, timestep)
                     if not flg_success:
                         break
 

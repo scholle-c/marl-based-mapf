@@ -11,6 +11,11 @@ from loguru import logger
 
 from marl_path.dataset.instance import CachedInstance
 from marl_path.delay_methods import DelayMethod
+from marl_path.path_noise import (
+    apply_path_noise,
+    displacement_stats,
+    divergence_stats,
+)
 from marl_path.pycam import LaCAM
 from marl_path.shared.mapf_utils import (
     BfsCache,
@@ -56,6 +61,9 @@ def run_evaluation(
     )
 
     results: list[InstanceResult] = []
+    delay_method_name = (
+        args.delay_method if args.delay_method else type(delay_method).__name__
+    )
 
     for npz_path in npz_files:
         instance = CachedInstance.load(npz_path)
@@ -68,9 +76,37 @@ def run_evaluation(
 
         bfs_cache = BfsCache(grid)
 
+        # Perturbed copy for the heuristic only — soc_cbs below must stay based
+        # on the true CBS paths, otherwise the reference moves with the noise.
+        heuristic_paths = apply_path_noise(
+            instance.paths,
+            noise=getattr(args, "path_noise", "none"),
+            level=getattr(args, "path_noise_level", 0.0),
+            ops=getattr(args, "path_noise_ops", 1),
+            seed=getattr(args, "path_noise_seed", 0),
+            p=getattr(args, "path_noise_p", 0.05),
+            grid=grid,
+            bfs_cache=bfs_cache,
+            goals=all_goals,
+        )
+
+        # Realized error magnitude — the nominal op count / error rate are not
+        # monotone, so the sweep aggregates on these instead. `shift_*` only
+        # applies to route-preserving noise, `div_*` to any operator.
+        shift_mean, shift_max = displacement_stats(instance.paths, heuristic_paths)
+        div_frac, div_len = divergence_stats(instance.paths, heuristic_paths)
+        logger.info(
+            "{}: noise_shift mean={:.4f} max={} div_frac={:.4f} div_len={:.4f}",
+            npz_path.stem,
+            shift_mean,
+            shift_max,
+            div_frac,
+            div_len,
+        )
+
         delay_maps = [
-            delay_method.compute(grid, bfs_cache, instance.paths, all_goals, agent_idx)
-            for agent_idx in range(len(instance.paths))
+            delay_method.compute(grid, bfs_cache, heuristic_paths, all_goals, agent_idx)
+            for agent_idx in range(len(heuristic_paths))
         ]
 
         soc_baseline = _run_lacam(
@@ -84,6 +120,8 @@ def run_evaluation(
             args.time_limit_ms,
             args.flg_star,
             delay_maps=delay_maps,
+            delay_method=delay_method_name,
+            cbs_path_penalty=getattr(args, "cbs_path_penalty", 100000.0),
         )
         soc_cbs = _soc_from_paths(instance.paths)
 
@@ -121,6 +159,8 @@ def _run_lacam(
     time_limit_ms: int,
     flg_star: bool,
     delay_maps: list[np.ndarray] | None = None,
+    delay_method: str = "max",
+    cbs_path_penalty: float = 100000.0,
 ) -> float | None:
     planner = LaCAM()
     solution = planner.solve(
@@ -128,6 +168,8 @@ def _run_lacam(
         starts=starts,
         goals=goals,
         delay_maps=delay_maps,
+        delay_method=delay_method,
+        cbs_path_penalty=cbs_path_penalty,
         seed=seed,
         time_limit_ms=time_limit_ms,
         flg_star=flg_star,

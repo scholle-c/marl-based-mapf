@@ -63,6 +63,8 @@ class LaCAM:
         starts: Config,
         goals: Config,
         delay_maps: Optional[list[np.ndarray]] = None,
+        delay_method: str = "max",
+        cbs_path_penalty: float = 100000.0,
         time_limit_ms: int = 3000,
         deadline: Optional[Deadline] = None,
         flg_star: bool = True,
@@ -74,6 +76,8 @@ class LaCAM:
         self.starts: Config = starts
         self.goals: Config = goals
         self.delay_maps = delay_maps
+        self.delay_method = delay_method
+        self.cbs_path_penalty = cbs_path_penalty
         self.deadline: Deadline = (
             deadline if deadline is not None else Deadline(time_limit_ms)
         )
@@ -93,6 +97,8 @@ class LaCAM:
                 self.grid, g,
                 bfs_cache=self.bfs_cache,
                 delay_map=delay_map,
+                delay_method=self.delay_method,
+                cbs_path_penalty=self.cbs_path_penalty,
             ))
         self.pibt = PIBT(self.dist_tables)
 
@@ -109,6 +115,7 @@ class LaCAM:
 
         while len(OPEN) > 0 and not self.deadline.is_expired:
             N: HighLevelNode = OPEN[0]
+            timestep = self.get_timestep(N)
 
             if N_goal is None and N.Q == self.goals:
                 N_goal = N
@@ -186,6 +193,15 @@ class LaCAM:
         configs.reverse()
         return configs
 
+    @staticmethod
+    def get_timestep(_N: HighLevelNode) -> int:
+        timestep: int = 0
+        N = _N
+        while N is not None:
+            timestep += 1
+            N = N.parent
+        return timestep
+
     def get_edge_cost(self, Q_from: Config, Q_to: Config) -> int:
         cost = 0
         for i in range(self.num_agents):
@@ -194,18 +210,34 @@ class LaCAM:
         return cost
 
     def get_h_value(self, Q: Config) -> int:
+        CONSIDER_DELAY = False
+
         cost = 0
         for agent_idx, loc in enumerate(Q):
-            c = self.dist_tables[agent_idx].get(loc)
+            if CONSIDER_DELAY:
+                c = self.dist_tables[agent_idx].get(loc)
+            else:
+                c = self.dist_tables[agent_idx].table[loc]
             if c is None:
                 return np.iinfo(np.int32).max
             cost += c
         return cost
 
     def get_order(self, Q: Config) -> list[int]:
+        # Priority is based on raw BFS distance-to-goal, not the
+        # delay-augmented distance — delay is meant to steer PIBT's move
+        # choice (via DistTable.get) and the high-level heuristic (h), not
+        # who gets first pick of a cell this timestep.
+        CONSIDER_DELAY = False
+
         order = list(range(self.num_agents))
         self.rng.shuffle(order)
-        order.sort(key=lambda i: self.dist_tables[i].get(Q[i]), reverse=True)
+        if CONSIDER_DELAY:
+            order.sort(
+                key=lambda i: self.dist_tables[i].get(Q[i]), reverse=True
+            )
+        else:
+            order.sort(key=lambda i: self.dist_tables[i].table[Q[i]], reverse=True)
         return order
 
     def configuration_generaotr(
@@ -215,7 +247,8 @@ class LaCAM:
         for k in range(C.depth):
             Q_to[C.who[k]] = C.where[k]
 
-        success = self.pibt.step(N.Q, Q_to, N.order)
+        timestep = self.get_timestep(N)
+        success = self.pibt.step(N.Q, Q_to, N.order, timestep)
         return Q_to if success else None
 
     def info(self, level: int, msg: str) -> None:

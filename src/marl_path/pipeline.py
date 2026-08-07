@@ -109,6 +109,26 @@ def run_evaluation(
             for agent_idx in range(len(heuristic_paths))
         ]
 
+        # Rolling horizon: keep only the first H timesteps of the CBS path. Past
+        # that, DistTable.get adds the penalty to *every* candidate, and since
+        # PIBT only sorts the neighbours of one agent at one timestep (pibt.py),
+        # a uniform offset is a no-op — guidance degrades to plain BFS rather
+        # than to garbage. Answers "how far ahead does the heuristic have to
+        # see?" without training anything.
+        horizon = getattr(args, "cbs_path_horizon", 0)
+        if delay_method_name == "cbs_path" and horizon > 0:
+            delay_maps = [dm[:horizon] for dm in delay_maps]
+
+        # A horizon of 10 means something very different on a 12x12 map than on
+        # Paris, so log the path lengths H should be read relative to.
+        _lens = [len(p) - 1 for p in instance.paths if p]
+        logger.info(
+            "{}: path_len mean={:.2f} max={}",
+            npz_path.stem,
+            sum(_lens) / len(_lens) if _lens else 0.0,
+            max(_lens, default=0),
+        )
+
         soc_baseline = _run_lacam(
             grid, starts, goals, args.seed, args.time_limit_ms, args.flg_star
         )

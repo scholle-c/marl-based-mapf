@@ -68,6 +68,14 @@ def main():
         "(--delay-method cbs_path). Large = hard constraint, small = hint.",
     )
     parser.add_argument(
+        "--cbs-path-horizon",
+        type=int,
+        default=0,
+        help="Truncate the time-indexed CBS path after H timesteps "
+        "(--delay-method cbs_path). Beyond H every candidate cell gets the same "
+        "penalty, so PIBT falls back to plain BFS. 0 = no truncation.",
+    )
+    parser.add_argument(
         "--path-noise",
         type=str,
         default="none",
